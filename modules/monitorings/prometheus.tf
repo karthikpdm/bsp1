@@ -1198,515 +1198,1160 @@
 
 
 
+# # =============================================================================
+# # VARIABLES - These come from your existing EKS module outputs
+# # =============================================================================
+
+# variable "eks_cluster_name" {
+#   description = "Name of the EKS cluster (from your EKS module output)"
+#   type        = string
+# }
+
+# variable "eks_cluster_oidc_issuer" {
+#   description = "OIDC issuer URL for the EKS cluster (from your EKS module output)"
+#   type        = string
+# }
+
+# variable "oidc_provider_arn" {
+#   description = "ARN of the OIDC provider (from your EKS module output)"
+#   type        = string
+# }
+
+# variable "aws_region" {
+#   description = "AWS region where resources will be created"
+#   type        = string
+#   default     = "us-east-1"  # Changed to match your actual region
+# }
+
+# # =============================================================================
+# # STEP 1: CREATE AMAZON MANAGED PROMETHEUS WORKSPACE
+# # =============================================================================
+
+# resource "aws_prometheus_workspace" "this" {
+#   alias = "eks-amp-workspace"
+#   tags = {
+#     Environment = "prod"
+#     Project     = "eks-monitoring"
+#   }
+# }
+
+# # =============================================================================
+# # STEP 2: CREATE IAM PERMISSIONS FOR PROMETHEUS TO ACCESS AMP
+# # =============================================================================
+
+# resource "aws_iam_policy" "amp_remote_write_policy" {
+#   name        = "EKS_AMP_RemoteWritePolicy"
+#   description = "IAM policy for Prometheus remote write to Amazon Managed Prometheus"
+
+#   policy = jsonencode({
+#     Version = "2012-10-17",
+#     Statement = [
+#       {
+#         Effect = "Allow"
+#         Action = [
+#           "aps:RemoteWrite",
+#           "aps:QueryMetrics"
+#         ]
+#         Resource = aws_prometheus_workspace.this.arn
+#       }
+#     ]
+#   })
+# }
+
+# # =============================================================================
+# # STEP 3: CREATE IAM ROLE FOR KUBERNETES SERVICE ACCOUNT (IRSA)
+# # =============================================================================
+
+# resource "aws_iam_role" "amp_prometheus_role" {
+#   name = "eks-amp-prometheus-role"
+
+#   assume_role_policy = jsonencode({
+#     Version = "2012-10-17",
+#     Statement = [{
+#       Effect = "Allow"
+#       Principal = {
+#         Federated = var.oidc_provider_arn
+#       }
+#       Action = "sts:AssumeRoleWithWebIdentity"
+#       Condition = {
+#         StringEquals = {
+#           "${replace(var.eks_cluster_oidc_issuer, "https://", "")}:sub" = "system:serviceaccount:monitoring:amp-prometheus-sa"
+#         }
+#       }
+#     }]
+#   })
+# }
+
+# resource "aws_iam_role_policy_attachment" "attach_amp_policy" {
+#   role       = aws_iam_role.amp_prometheus_role.name
+#   policy_arn = aws_iam_policy.amp_remote_write_policy.arn
+# }
+
+# # =============================================================================
+# # STEP 4: CREATE KUBERNETES NAMESPACE AND SERVICE ACCOUNT
+# # =============================================================================
+
+# resource "kubernetes_service_account" "amp_prometheus_sa" {
+#   metadata {
+#     name      = "amp-prometheus-sa"
+#     namespace = "monitoring"
+#     annotations = {
+#       "eks.amazonaws.com/role-arn" = aws_iam_role.amp_prometheus_role.arn
+#     }
+#   }
+# }
+
+# # =============================================================================
+# # STEP 5A: DEPLOY KUBE-STATE-METRICS
+# # =============================================================================
+
+# resource "helm_release" "kube_state_metrics" {
+#   name       = "kube-state-metrics"
+#   chart      = "kube-state-metrics"
+#   repository = "https://prometheus-community.github.io/helm-charts"
+#   namespace  = "monitoring"
+#   version    = "5.15.2"
+
+#   values = [
+#     yamlencode({
+#       podAnnotations = {
+#         "prometheus.io/scrape" = "true"
+#         "prometheus.io/port"   = "8080"
+#         "prometheus.io/path"   = "/metrics"
+#       }
+#     })
+#   ]
+# }
+
+# # =============================================================================
+# # STEP 5B: DEPLOY NODE-EXPORTER
+# # =============================================================================
+
+# resource "helm_release" "node_exporter" {
+#   name       = "node-exporter"
+#   chart      = "prometheus-node-exporter"
+#   repository = "https://prometheus-community.github.io/helm-charts"
+#   namespace  = "monitoring"
+#   version    = "4.24.0"
+
+#   values = [
+#     yamlencode({
+#       podAnnotations = {
+#         "prometheus.io/scrape" = "true"
+#         "prometheus.io/port"   = "9100"
+#         "prometheus.io/path"   = "/metrics"
+#       }
+#       hostPID     = true
+#       hostIPC     = true
+#       hostNetwork = true
+#     })
+#   ]
+# }
+
+# # =============================================================================
+# # STEP 5C: CLEANUP EXISTING CONFIGMAP BEFORE ADOT DEPLOYMENT
+# # =============================================================================
+
+# resource "null_resource" "cleanup_existing_configmap" {
+#   provisioner "local-exec" {
+#     command = <<-EOT
+#       echo "Cleaning up any existing ConfigMap..."
+#       kubectl delete configmap adot-conf -n monitoring --ignore-not-found=true
+#       echo "Cleanup completed"
+#     EOT
+#   }
+
+#   depends_on = [
+#     helm_release.kube_state_metrics,
+#     helm_release.node_exporter
+#   ]
+# }
+
+# # =============================================================================
+# # STEP 5D: CREATE FIXED CONFIGMAP WITH PROPER CONFIGURATION
+# # =============================================================================
+
+# resource "kubernetes_config_map" "adot_config_correct" {
+#   metadata {
+#     name      = "adot-conf"
+#     namespace = "monitoring"
+#     labels = {
+#       app                                        = "opentelemetry"
+#       "app.kubernetes.io/component"              = "opentelemetry"
+#       "app.kubernetes.io/instance"               = "adot-collector"
+#       "app.kubernetes.io/managed-by"             = "Terraform"
+#       "app.kubernetes.io/name"                   = "adot-exporter-for-eks-on-ec2"
+#       "app.kubernetes.io/part-of"                = "adot-exporter-for-eks-on-ec2"
+#       "app.kubernetes.io/version"                = "0.37.0"
+#       component                                  = "adot-conf"
+#     }
+#     annotations = {
+#       "meta.helm.sh/release-name"      = "adot-collector"
+#       "meta.helm.sh/release-namespace" = "monitoring"
+#       "managed-by"                     = "terraform"
+#     }
+#   }
+
+#   # Add lifecycle management to handle recreation properly
+#   lifecycle {
+#     create_before_destroy = false
+#     ignore_changes = [
+#       metadata[0].resource_version,
+#       metadata[0].uid
+#     ]
+#   }
+
+#   data = {
+#     "adot-config" = yamlencode({
+#       extensions = {
+#         health_check = {}
+#         sigv4auth = {
+#           region  = var.aws_region
+#           service = "aps"
+#         }
+#       }
+#       receivers = {
+#         prometheus = {
+#           config = {
+#             global = {
+#               scrape_interval = "30s"
+#               scrape_timeout  = "10s"
+#               external_labels = {
+#                 cluster = var.eks_cluster_name
+#                 region  = var.aws_region
+#               }
+#             }
+#             scrape_configs = [
+#               {
+#                 job_name         = "kubernetes-pods"
+#                 honor_timestamps = false  # CRITICAL: Fixes out-of-order timestamp issues
+#                 sample_limit     = 10000
+#                 metrics_path     = "/metrics"
+#                 kubernetes_sd_configs = [
+#                   { role = "pod" }
+#                 ]
+#                 relabel_configs = [
+#                   {
+#                     source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
+#                     action        = "keep"
+#                     regex         = "true"
+#                   },
+#                   {
+#                     source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
+#                     action        = "replace"
+#                     regex         = "(.+)"
+#                     target_label  = "__metrics_path__"
+#                   },
+#                   # FIXED: Proper regex replacement syntax
+#                   {
+#                     source_labels = ["__address__", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
+#                     action        = "replace"
+#                     regex         = "([^:]+)(?::\\d+)?;(\\d+)"
+#                     replacement   = "${1}:${2}"  # FIXED: Use ${1} instead of $1
+#                     target_label  = "__address__"
+#                   },
+#                   # Add default port for pods without port annotation
+#                   {
+#                     source_labels = ["__address__"]
+#                     regex         = "([^:]+):$"
+#                     target_label  = "__address__"
+#                     replacement   = "${1}:8080"  # FIXED: Use ${1} instead of $1
+#                   },
+#                   {
+#                     action = "labelmap"
+#                     regex  = "__meta_kubernetes_pod_label_(.+)"
+#                   },
+#                   {
+#                     source_labels = ["__meta_kubernetes_namespace"]
+#                     action        = "replace"
+#                     target_label  = "kubernetes_namespace"
+#                   },
+#                   {
+#                     source_labels = ["__meta_kubernetes_pod_name"]
+#                     action        = "replace"
+#                     target_label  = "kubernetes_pod_name"
+#                   },
+#                   # FIXED: Ensure instance label is properly set
+#                   {
+#                     source_labels = ["__address__"]
+#                     action        = "replace"
+#                     target_label  = "instance"
+#                   }
+#                 ]
+#               }
+#             ]
+#           }
+#         }
+#       }
+#       processors = {
+#         "memory_limiter" = {
+#           limit_mib = 512
+#         }
+#         "batch/metrics" = {
+#           timeout         = "60s"
+#           send_batch_size = 1000
+#           send_batch_max_size = 1500
+#         }
+#       }
+#       exporters = {
+#         prometheusremotewrite = {
+#           endpoint = "${aws_prometheus_workspace.this.prometheus_endpoint}api/v1/remote_write"
+#           auth = {
+#             authenticator = "sigv4auth"
+#           }
+#           retry_on_failure = {
+#             enabled         = true
+#             initial_interval = "5s"
+#             max_interval    = "30s"
+#             max_elapsed_time = "300s"
+#           }
+#           sending_queue = {
+#             enabled      = true
+#             num_consumers = 5    # REDUCED: From 10 to 5 to reduce memory pressure
+#             queue_size   = 1000  # REDUCED: From 5000 to 1000
+#           }
+#           timeout = "30s"
+#           resource_to_telemetry_conversion = {
+#             enabled = false
+#           }
+#           # ADDED: Additional configuration to handle AMP better
+#           remote_write_queue = {
+#             capacity = 2500
+#             max_shards = 200
+#             min_shards = 1
+#             max_samples_per_send = 500
+#           }
+#         }
+#       }
+#       service = {
+#         extensions = ["health_check", "sigv4auth"]
+#         pipelines = {
+#           metrics = {
+#             receivers  = ["prometheus"]
+#             processors = ["memory_limiter", "batch/metrics"]
+#             exporters  = ["prometheusremotewrite"]
+#           }
+#         }
+#       }
+#     })
+#   }
+
+#   depends_on = [
+#     null_resource.cleanup_existing_configmap
+#   ]
+# }
+
+# # =============================================================================
+# # STEP 5E: DEPLOY ADOT COLLECTOR AFTER CONFIGMAP
+# # =============================================================================
+
+# resource "helm_release" "adot_collector" {
+#   name       = "adot-collector"
+#   chart      = "adot-exporter-for-eks-on-ec2"
+#   repository = "https://aws-observability.github.io/aws-otel-helm-charts"
+#   namespace  = "monitoring"
+
+#   values = [
+#     yamlencode({
+#       awsRegion   = var.aws_region
+#       clusterName = var.eks_cluster_name
+
+#       adotCollector = {
+#         daemonSet = {
+#           namespace       = "monitoring"
+#           createNamespace = false
+#           serviceAccount = {
+#             create = false
+#             name   = kubernetes_service_account.amp_prometheus_sa.metadata[0].name
+#           }
+#         }
+#       }
+
+#       # Disable default ConfigMap creation to prevent conflicts
+#       configMap = {
+#         create = false
+#       }
+#     })
+#   ]
+
+#   depends_on = [
+#     kubernetes_config_map.adot_config_correct
+#   ]
+# }
+
+# # =============================================================================
+# # STEP 5F: RESTART ADOT PODS AFTER DEPLOYMENT
+# # =============================================================================
+
+# resource "null_resource" "restart_adot_pods" {
+#   triggers = {
+#     config_hash = sha256(kubernetes_config_map.adot_config_correct.data["adot-config"])
+#     always_run  = timestamp()
+#   }
+
+#   provisioner "local-exec" {
+#     command = <<-EOT
+#       echo "Waiting for ADOT DaemonSet to be ready..."
+#       kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 -n monitoring --timeout=300s || true
+      
+#       echo "Restarting ADOT DaemonSet..."
+#       kubectl rollout restart daemonset/adot-collector-daemonset -n monitoring || true
+      
+#       echo "Waiting for rollout to complete..."
+#       kubectl rollout status daemonset/adot-collector-daemonset -n monitoring --timeout=300s || true
+      
+#       echo "ADOT pods status:"
+#       kubectl get pods -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2
+#     EOT
+#   }
+
+#   depends_on = [
+#     helm_release.adot_collector
+#   ]
+# }
+
+# # =============================================================================
+# # STEP 7: CREATE IAM PERMISSIONS FOR GRAFANA TO ACCESS AMP
+# # =============================================================================
+
+# resource "aws_iam_role" "grafana_role" {
+#   name = "eks-grafana-amp-role"
+
+#   assume_role_policy = jsonencode({
+#     Version = "2012-10-17"
+#     Statement = [
+#       {
+#         Effect = "Allow"
+#         Principal = {
+#           Service = "grafana.amazonaws.com"
+#         }
+#         Action = "sts:AssumeRole"
+#       }
+#     ]
+#   })
+# }
+
+# resource "aws_iam_role_policy" "grafana_amp_policy" {
+#   name = "GrafanaAMPPolicy"
+#   role = aws_iam_role.grafana_role.id
+
+#   policy = jsonencode({
+#     Version = "2012-10-17"
+#     Statement = [
+#       {
+#         Effect = "Allow"
+#         Action = [
+#           "aps:ListWorkspaces",
+#           "aps:DescribeWorkspace",
+#           "aps:QueryMetrics",
+#           "aps:GetLabels",
+#           "aps:GetSeries",
+#           "aps:GetMetricMetadata"
+#         ]
+#         Resource = "*"
+#       }
+#     ]
+#   })
+# }
+
+# # =============================================================================
+# # OUTPUTS
+# # =============================================================================
+
+# output "prometheus_workspace_id" {
+#   description = "Amazon Managed Prometheus workspace ID"
+#   value       = aws_prometheus_workspace.this.id
+# }
+
+# output "prometheus_endpoint" {
+#   description = "Amazon Managed Prometheus endpoint"
+#   value       = aws_prometheus_workspace.this.prometheus_endpoint
+# }
+
+# output "amp_prometheus_role_arn" {
+#   description = "IAM role ARN for AMP Prometheus"
+#   value       = aws_iam_role.amp_prometheus_role.arn
+# }
+
+# output "grafana_role_arn" {
+#   description = "IAM role ARN for Grafana"
+#   value       = aws_iam_role.grafana_role.arn
+# }
+
+# output "validation_commands" {
+#   description = "Commands to validate the setup"
+#   value = <<-EOT
+# # === BASIC VALIDATION COMMANDS ===
+
+# # 1. Check AMP workspace
+# aws amp describe-workspace --workspace-id ${aws_prometheus_workspace.this.id} --region ${var.aws_region}
+
+# # 2. Check ADOT pods
+# kubectl get pods -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2
+
+# # 3. Check ADOT logs for errors
+# kubectl logs -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 --tail=20
+
+# # 4. Check ConfigMap
+# kubectl get configmap adot-conf -n monitoring -o yaml
+
+# # 5. Test AMP connectivity
+# aws amp query-metrics --workspace-id ${aws_prometheus_workspace.this.id} --region ${var.aws_region} --query-string 'up' --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ) --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# # === TROUBLESHOOTING COMMANDS ===
+
+# # Check for scrape errors
+# kubectl logs -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 --tail=100 | grep "Failed to scrape"
+
+# # Check for export errors  
+# kubectl logs -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 --tail=100 | grep "Exporting failed"
+
+# # Test service connectivity
+# kubectl exec -n monitoring -c adot-collector-container $(kubectl get pods -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 -o jsonpath='{.items[0].metadata.name}') -- /bin/sh -c "timeout 5 cat < /dev/tcp/kube-state-metrics/8080" && echo "kube-state-metrics reachable" || echo "kube-state-metrics NOT reachable"
+#   EOT
+# }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#New
+
+
+
 # =============================================================================
-# VARIABLES - These come from your existing EKS module outputs
+# EKS Metrics Scraping to Amazon Managed Prometheus (AMP)
+# Complete Terraform Configuration
 # =============================================================================
 
-variable "eks_cluster_name" {
-  description = "Name of the EKS cluster (from your EKS module output)"
+# Data source to get existing EKS cluster information
+data "aws_eks_cluster" "existing" {
+  name = var.cluster_name
+}
+
+data "aws_eks_cluster_auth" "existing" {
+  name = var.cluster_name
+}
+
+# Data source for current AWS account and region
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+# =============================================================================
+# VARIABLES
+# =============================================================================
+
+variable "cluster_name" {
+  description = "Name of the existing EKS cluster"
   type        = string
 }
 
-variable "eks_cluster_oidc_issuer" {
-  description = "OIDC issuer URL for the EKS cluster (from your EKS module output)"
+variable "amp_workspace_name" {
+  description = "Name for the AMP workspace"
   type        = string
+  default     = "eks-monitoring-workspace"
 }
 
-variable "oidc_provider_arn" {
-  description = "ARN of the OIDC provider (from your EKS module output)"
+variable "prometheus_namespace" {
+  description = "Kubernetes namespace for Prometheus components"
   type        = string
-}
-
-variable "aws_region" {
-  description = "AWS region where resources will be created"
-  type        = string
-  default     = "us-east-1"  # Changed to match your actual region
+  default     = "amazon-cloudwatch"
 }
 
 # =============================================================================
-# STEP 1: CREATE AMAZON MANAGED PROMETHEUS WORKSPACE
+# AMAZON MANAGED PROMETHEUS (AMP) WORKSPACE
 # =============================================================================
 
-resource "aws_prometheus_workspace" "this" {
-  alias = "eks-amp-workspace"
+# Create AMP workspace to store metrics
+resource "aws_prometheus_workspace" "amp" {
+  alias = var.amp_workspace_name
+  
   tags = {
-    Environment = "prod"
-    Project     = "eks-monitoring"
+    Name        = var.amp_workspace_name
+    Environment = "monitoring"
+    Purpose     = "EKS-metrics-collection"
   }
 }
 
 # =============================================================================
-# STEP 2: CREATE IAM PERMISSIONS FOR PROMETHEUS TO ACCESS AMP
+# IAM ROLES AND POLICIES
 # =============================================================================
 
-resource "aws_iam_policy" "amp_remote_write_policy" {
-  name        = "EKS_AMP_RemoteWritePolicy"
-  description = "IAM policy for Prometheus remote write to Amazon Managed Prometheus"
+# OIDC Identity Provider for EKS cluster (if not already exists)
+data "tls_certificate" "eks_oidc" {
+  url = data.aws_eks_cluster.existing.identity[0].oidc[0].issuer
+}
+
+resource "aws_iam_openid_connect_provider" "eks_oidc" {
+  count = length(data.aws_iam_openid_connect_provider.existing.arn) == 0 ? 1 : 0
+  
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = [data.tls_certificate.eks_oidc.certificates[0].sha1_fingerprint]
+  url             = data.aws_eks_cluster.existing.identity[0].oidc[0].issuer
+}
+
+# Check if OIDC provider already exists
+data "aws_iam_openid_connect_provider" "existing" {
+  url = data.aws_eks_cluster.existing.identity[0].oidc[0].issuer
+}
+
+# IAM Role for Prometheus Service Account
+resource "aws_iam_role" "prometheus_service_account" {
+  name = "${var.cluster_name}-prometheus-service-account-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Effect = "Allow"
+        Principal = {
+          Federated = length(data.aws_iam_openid_connect_provider.existing.arn) > 0 ? data.aws_iam_openid_connect_provider.existing.arn : aws_iam_openid_connect_provider.eks_oidc[0].arn
+        }
+        Condition = {
+          StringEquals = {
+            "${replace(data.aws_eks_cluster.existing.identity[0].oidc[0].issuer, "https://", "")}:sub" = "system:serviceaccount:${var.prometheus_namespace}:amp-iamproxy-ingest-service-account"
+            "${replace(data.aws_eks_cluster.existing.identity[0].oidc[0].issuer, "https://", "")}:aud" = "sts.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name = "${var.cluster_name}-prometheus-service-account-role"
+  }
+}
+
+# IAM Policy for AMP access
+resource "aws_iam_policy" "prometheus_amp_access" {
+  name        = "${var.cluster_name}-prometheus-amp-access"
+  description = "Policy for Prometheus to access AMP"
 
   policy = jsonencode({
-    Version = "2012-10-17",
+    Version = "2012-10-17"
     Statement = [
       {
         Effect = "Allow"
         Action = [
           "aps:RemoteWrite",
-          "aps:QueryMetrics"
+          "aps:QueryMetrics",
+          "aps:GetSeries",
+          "aps:GetLabels",
+          "aps:GetMetricMetadata"
         ]
-        Resource = aws_prometheus_workspace.this.arn
+        Resource = aws_prometheus_workspace.amp.arn
       }
     ]
   })
 }
 
-# =============================================================================
-# STEP 3: CREATE IAM ROLE FOR KUBERNETES SERVICE ACCOUNT (IRSA)
-# =============================================================================
-
-resource "aws_iam_role" "amp_prometheus_role" {
-  name = "eks-amp-prometheus-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Federated = var.oidc_provider_arn
-      }
-      Action = "sts:AssumeRoleWithWebIdentity"
-      Condition = {
-        StringEquals = {
-          "${replace(var.eks_cluster_oidc_issuer, "https://", "")}:sub" = "system:serviceaccount:monitoring:amp-prometheus-sa"
-        }
-      }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "attach_amp_policy" {
-  role       = aws_iam_role.amp_prometheus_role.name
-  policy_arn = aws_iam_policy.amp_remote_write_policy.arn
+# Attach policy to role
+resource "aws_iam_role_policy_attachment" "prometheus_amp_access" {
+  role       = aws_iam_role.prometheus_service_account.name
+  policy_arn = aws_iam_policy.prometheus_amp_access.arn
 }
 
 # =============================================================================
-# STEP 4: CREATE KUBERNETES NAMESPACE AND SERVICE ACCOUNT
+# KUBERNETES PROVIDER CONFIGURATION
 # =============================================================================
 
-resource "kubernetes_service_account" "amp_prometheus_sa" {
+provider "kubernetes" {
+  host                   = data.aws_eks_cluster.existing.endpoint
+  cluster_ca_certificate = base64decode(data.aws_eks_cluster.existing.certificate_authority[0].data)
+  token                  = data.aws_eks_cluster_auth.existing.token
+}
+
+provider "helm" {
+  kubernetes {
+    host                   = data.aws_eks_cluster.existing.endpoint
+    cluster_ca_certificate = base64decode(data.aws_eks_cluster.existing.certificate_authority[0].data)
+    token                  = data.aws_eks_cluster_auth.existing.token
+  }
+}
+
+# =============================================================================
+# KUBERNETES RESOURCES
+# =============================================================================
+
+# Create namespace for monitoring components
+resource "kubernetes_namespace" "monitoring" {
   metadata {
-    name      = "amp-prometheus-sa"
-    namespace = "monitoring"
-    annotations = {
-      "eks.amazonaws.com/role-arn" = aws_iam_role.amp_prometheus_role.arn
-    }
+    name = var.prometheus_namespace
   }
 }
 
-# =============================================================================
-# STEP 5A: DEPLOY KUBE-STATE-METRICS
-# =============================================================================
-
-resource "helm_release" "kube_state_metrics" {
-  name       = "kube-state-metrics"
-  chart      = "kube-state-metrics"
-  repository = "https://prometheus-community.github.io/helm-charts"
-  namespace  = "monitoring"
-  version    = "5.15.2"
-
-  values = [
-    yamlencode({
-      podAnnotations = {
-        "prometheus.io/scrape" = "true"
-        "prometheus.io/port"   = "8080"
-        "prometheus.io/path"   = "/metrics"
-      }
-    })
-  ]
-}
-
-# =============================================================================
-# STEP 5B: DEPLOY NODE-EXPORTER
-# =============================================================================
-
-resource "helm_release" "node_exporter" {
-  name       = "node-exporter"
-  chart      = "prometheus-node-exporter"
-  repository = "https://prometheus-community.github.io/helm-charts"
-  namespace  = "monitoring"
-  version    = "4.24.0"
-
-  values = [
-    yamlencode({
-      podAnnotations = {
-        "prometheus.io/scrape" = "true"
-        "prometheus.io/port"   = "9100"
-        "prometheus.io/path"   = "/metrics"
-      }
-      hostPID     = true
-      hostIPC     = true
-      hostNetwork = true
-    })
-  ]
-}
-
-# =============================================================================
-# STEP 5C: CLEANUP EXISTING CONFIGMAP BEFORE ADOT DEPLOYMENT
-# =============================================================================
-
-resource "null_resource" "cleanup_existing_configmap" {
-  provisioner "local-exec" {
-    command = <<-EOT
-      echo "Cleaning up any existing ConfigMap..."
-      kubectl delete configmap adot-conf -n monitoring --ignore-not-found=true
-      echo "Cleanup completed"
-    EOT
-  }
-
-  depends_on = [
-    helm_release.kube_state_metrics,
-    helm_release.node_exporter
-  ]
-}
-
-# =============================================================================
-# STEP 5D: CREATE FIXED CONFIGMAP WITH PROPER CONFIGURATION
-# =============================================================================
-
-resource "kubernetes_config_map" "adot_config_correct" {
+# Service Account for Prometheus
+resource "kubernetes_service_account" "prometheus" {
   metadata {
-    name      = "adot-conf"
-    namespace = "monitoring"
-    labels = {
-      app                                        = "opentelemetry"
-      "app.kubernetes.io/component"              = "opentelemetry"
-      "app.kubernetes.io/instance"               = "adot-collector"
-      "app.kubernetes.io/managed-by"             = "Terraform"
-      "app.kubernetes.io/name"                   = "adot-exporter-for-eks-on-ec2"
-      "app.kubernetes.io/part-of"                = "adot-exporter-for-eks-on-ec2"
-      "app.kubernetes.io/version"                = "0.37.0"
-      component                                  = "adot-conf"
-    }
+    name      = "amp-iamproxy-ingest-service-account"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
     annotations = {
-      "meta.helm.sh/release-name"      = "adot-collector"
-      "meta.helm.sh/release-namespace" = "monitoring"
-      "managed-by"                     = "terraform"
+      "eks.amazonaws.com/role-arn" = aws_iam_role.prometheus_service_account.arn
     }
   }
+}
 
-  # Add lifecycle management to handle recreation properly
-  lifecycle {
-    create_before_destroy = false
-    ignore_changes = [
-      metadata[0].resource_version,
-      metadata[0].uid
-    ]
+# ConfigMap for Prometheus configuration
+resource "kubernetes_config_map" "prometheus_config" {
+  metadata {
+    name      = "prometheus-config"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
   }
 
   data = {
-    "adot-config" = yamlencode({
-      extensions = {
-        health_check = {}
-        sigv4auth = {
-          region  = var.aws_region
-          service = "aps"
-        }
+    "prometheus.yml" = yamlencode({
+      global = {
+        scrape_interval = "15s"
+        evaluation_interval = "15s"
       }
-      receivers = {
-        prometheus = {
-          config = {
-            global = {
-              scrape_interval = "30s"
-              scrape_timeout  = "10s"
-              external_labels = {
-                cluster = var.eks_cluster_name
-                region  = var.aws_region
-              }
+      
+      remote_write = [{
+        url = "${aws_prometheus_workspace.amp.prometheus_endpoint}api/v1/remote_write"
+        queue_config = {
+          max_samples_per_send = 1000
+          max_shards = 200
+          capacity = 2500
+        }
+        write_relabel_configs = [{
+          source_labels = ["__name__"]
+          regex = "container_cpu_usage_seconds_total|container_memory_working_set_bytes|container_network_receive_bytes_total|container_network_transmit_bytes_total|kube_pod_info|kube_pod_status_phase|kube_node_info|kube_node_status_condition|kube_deployment_status_replicas|kube_deployment_status_replicas_available"
+          action = "keep"
+        }]
+      }]
+      
+      scrape_configs = [
+        {
+          job_name = "kubernetes-apiservers"
+          kubernetes_sd_configs = [{
+            role = "endpoints"
+          }]
+          scheme = "https"
+          tls_config = {
+            ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+          }
+          bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+          relabel_configs = [
+            {
+              source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_service_name", "__meta_kubernetes_endpoint_port_name"]
+              action = "keep"
+              regex = "default;kubernetes;https"
             }
-            scrape_configs = [
-              {
-                job_name         = "kubernetes-pods"
-                honor_timestamps = false  # CRITICAL: Fixes out-of-order timestamp issues
-                sample_limit     = 10000
-                metrics_path     = "/metrics"
-                kubernetes_sd_configs = [
-                  { role = "pod" }
-                ]
-                relabel_configs = [
-                  {
-                    source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
-                    action        = "keep"
-                    regex         = "true"
-                  },
-                  {
-                    source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
-                    action        = "replace"
-                    regex         = "(.+)"
-                    target_label  = "__metrics_path__"
-                  },
-                  # FIXED: Proper regex replacement syntax
-                  {
-                    source_labels = ["__address__", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
-                    action        = "replace"
-                    regex         = "([^:]+)(?::\\d+)?;(\\d+)"
-                    replacement   = "${1}:${2}"  # FIXED: Use ${1} instead of $1
-                    target_label  = "__address__"
-                  },
-                  # Add default port for pods without port annotation
-                  {
-                    source_labels = ["__address__"]
-                    regex         = "([^:]+):$"
-                    target_label  = "__address__"
-                    replacement   = "${1}:8080"  # FIXED: Use ${1} instead of $1
-                  },
-                  {
-                    action = "labelmap"
-                    regex  = "__meta_kubernetes_pod_label_(.+)"
-                  },
-                  {
-                    source_labels = ["__meta_kubernetes_namespace"]
-                    action        = "replace"
-                    target_label  = "kubernetes_namespace"
-                  },
-                  {
-                    source_labels = ["__meta_kubernetes_pod_name"]
-                    action        = "replace"
-                    target_label  = "kubernetes_pod_name"
-                  },
-                  # FIXED: Ensure instance label is properly set
-                  {
-                    source_labels = ["__address__"]
-                    action        = "replace"
-                    target_label  = "instance"
-                  }
-                ]
-              }
-            ]
+          ]
+        },
+        {
+          job_name = "kubernetes-nodes"
+          kubernetes_sd_configs = [{
+            role = "node"
+          }]
+          scheme = "https"
+          tls_config = {
+            ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           }
+          bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+          relabel_configs = [
+            {
+              action = "labelmap"
+              regex = "__meta_kubernetes_node_label_(.+)"
+            }
+          ]
+        },
+        {
+          job_name = "kubernetes-cadvisor"
+          kubernetes_sd_configs = [{
+            role = "node"
+          }]
+          scheme = "https"
+          metrics_path = "/metrics/cadvisor"
+          tls_config = {
+            ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+          }
+          bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+          relabel_configs = [
+            {
+              action = "labelmap"
+              regex = "__meta_kubernetes_node_label_(.+)"
+            }
+          ]
+        },
+        {
+          job_name = "kubernetes-service-endpoints"
+          kubernetes_sd_configs = [{
+            role = "endpoints"
+          }]
+          relabel_configs = [
+            {
+              source_labels = ["__meta_kubernetes_service_annotation_prometheus_io_scrape"]
+              action = "keep"
+              regex = true
+            },
+            {
+              source_labels = ["__meta_kubernetes_service_annotation_prometheus_io_path"]
+              action = "replace"
+              target_label = "__metrics_path__"
+              regex = "(.+)"
+            }
+          ]
+        },
+        {
+          job_name = "kubernetes-pods"
+          kubernetes_sd_configs = [{
+            role = "pod"
+          }]
+          relabel_configs = [
+            {
+              source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
+              action = "keep"
+              regex = true
+            },
+            {
+              source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
+              action = "replace"
+              target_label = "__metrics_path__"
+              regex = "(.+)"
+            }
+          ]
         }
-      }
-      processors = {
-        "memory_limiter" = {
-          limit_mib = 512
-        }
-        "batch/metrics" = {
-          timeout         = "60s"
-          send_batch_size = 1000
-          send_batch_max_size = 1500
-        }
-      }
-      exporters = {
-        prometheusremotewrite = {
-          endpoint = "${aws_prometheus_workspace.this.prometheus_endpoint}api/v1/remote_write"
-          auth = {
-            authenticator = "sigv4auth"
-          }
-          retry_on_failure = {
-            enabled         = true
-            initial_interval = "5s"
-            max_interval    = "30s"
-            max_elapsed_time = "300s"
-          }
-          sending_queue = {
-            enabled      = true
-            num_consumers = 5    # REDUCED: From 10 to 5 to reduce memory pressure
-            queue_size   = 1000  # REDUCED: From 5000 to 1000
-          }
-          timeout = "30s"
-          resource_to_telemetry_conversion = {
-            enabled = false
-          }
-          # ADDED: Additional configuration to handle AMP better
-          remote_write_queue = {
-            capacity = 2500
-            max_shards = 200
-            min_shards = 1
-            max_samples_per_send = 500
-          }
-        }
-      }
-      service = {
-        extensions = ["health_check", "sigv4auth"]
-        pipelines = {
-          metrics = {
-            receivers  = ["prometheus"]
-            processors = ["memory_limiter", "batch/metrics"]
-            exporters  = ["prometheusremotewrite"]
-          }
-        }
-      }
+      ]
     })
   }
-
-  depends_on = [
-    null_resource.cleanup_existing_configmap
-  ]
 }
 
 # =============================================================================
-# STEP 5E: DEPLOY ADOT COLLECTOR AFTER CONFIGMAP
+# PROMETHEUS DEPLOYMENT
 # =============================================================================
 
-resource "helm_release" "adot_collector" {
-  name       = "adot-collector"
-  chart      = "adot-exporter-for-eks-on-ec2"
-  repository = "https://aws-observability.github.io/aws-otel-helm-charts"
-  namespace  = "monitoring"
+# Prometheus Deployment
+resource "kubernetes_deployment" "prometheus" {
+  metadata {
+    name      = "prometheus"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+    labels = {
+      app = "prometheus"
+    }
+  }
 
-  values = [
-    yamlencode({
-      awsRegion   = var.aws_region
-      clusterName = var.eks_cluster_name
+  spec {
+    replicas = 1
 
-      adotCollector = {
-        daemonSet = {
-          namespace       = "monitoring"
-          createNamespace = false
-          serviceAccount = {
-            create = false
-            name   = kubernetes_service_account.amp_prometheus_sa.metadata[0].name
+    selector {
+      match_labels = {
+        app = "prometheus"
+      }
+    }
+
+    template {
+      metadata {
+        labels = {
+          app = "prometheus"
+        }
+      }
+
+      spec {
+        service_account_name = kubernetes_service_account.prometheus.metadata[0].name
+
+        container {
+          name  = "prometheus"
+          image = "prom/prometheus:latest"
+          
+          port {
+            container_port = 9090
+          }
+
+          args = [
+            "--config.file=/etc/prometheus/prometheus.yml",
+            "--storage.tsdb.path=/prometheus/",
+            "--web.console.libraries=/etc/prometheus/console_libraries",
+            "--web.console.templates=/etc/prometheus/consoles",
+            "--web.enable-lifecycle"
+          ]
+
+          volume_mount {
+            name       = "prometheus-config"
+            mount_path = "/etc/prometheus"
+          }
+
+          volume_mount {
+            name       = "prometheus-storage"
+            mount_path = "/prometheus"
+          }
+
+          resources {
+            limits = {
+              memory = "2Gi"
+              cpu    = "1000m"
+            }
+            requests = {
+              memory = "1Gi"
+              cpu    = "500m"
+            }
+          }
+        }
+
+        volume {
+          name = "prometheus-config"
+          config_map {
+            name = kubernetes_config_map.prometheus_config.metadata[0].name
+          }
+        }
+
+        volume {
+          name = "prometheus-storage"
+          empty_dir {}
+        }
+      }
+    }
+  }
+}
+
+# Prometheus Service
+resource "kubernetes_service" "prometheus" {
+  metadata {
+    name      = "prometheus"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+    labels = {
+      app = "prometheus"
+    }
+  }
+
+  spec {
+    selector = {
+      app = "prometheus"
+    }
+
+    port {
+      port        = 9090
+      target_port = 9090
+    }
+
+    type = "ClusterIP"
+  }
+}
+
+# =============================================================================
+# KUBE-STATE-METRICS DEPLOYMENT
+# =============================================================================
+
+# Kube-state-metrics for cluster-level metrics
+resource "kubernetes_deployment" "kube_state_metrics" {
+  metadata {
+    name      = "kube-state-metrics"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+    labels = {
+      app = "kube-state-metrics"
+    }
+  }
+
+  spec {
+    replicas = 1
+
+    selector {
+      match_labels = {
+        app = "kube-state-metrics"
+      }
+    }
+
+    template {
+      metadata {
+        labels = {
+          app = "kube-state-metrics"
+        }
+        annotations = {
+          "prometheus.io/scrape" = "true"
+          "prometheus.io/port"   = "8080"
+        }
+      }
+
+      spec {
+        container {
+          name  = "kube-state-metrics"
+          image = "k8s.gcr.io/kube-state-metrics/kube-state-metrics:v2.10.0"
+          
+          port {
+            container_port = 8080
+            name          = "http-metrics"
+          }
+
+          port {
+            container_port = 8081
+            name          = "telemetry"
+          }
+
+          liveness_probe {
+            http_get {
+              path = "/healthz"
+              port = 8080
+            }
+            initial_delay_seconds = 5
+            timeout_seconds       = 5
+          }
+
+          readiness_probe {
+            http_get {
+              path = "/"
+              port = 8081
+            }
+            initial_delay_seconds = 5
+            timeout_seconds       = 5
+          }
+
+          resources {
+            limits = {
+              memory = "256Mi"
+              cpu    = "100m"
+            }
+            requests = {
+              memory = "128Mi"
+              cpu    = "50m"
+            }
           }
         }
       }
-
-      # Disable default ConfigMap creation to prevent conflicts
-      configMap = {
-        create = false
-      }
-    })
-  ]
-
-  depends_on = [
-    kubernetes_config_map.adot_config_correct
-  ]
+    }
+  }
 }
 
-# =============================================================================
-# STEP 5F: RESTART ADOT PODS AFTER DEPLOYMENT
-# =============================================================================
-
-resource "null_resource" "restart_adot_pods" {
-  triggers = {
-    config_hash = sha256(kubernetes_config_map.adot_config_correct.data["adot-config"])
-    always_run  = timestamp()
+# Kube-state-metrics Service
+resource "kubernetes_service" "kube_state_metrics" {
+  metadata {
+    name      = "kube-state-metrics"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+    labels = {
+      app = "kube-state-metrics"
+    }
+    annotations = {
+      "prometheus.io/scrape" = "true"
+      "prometheus.io/port"   = "8080"
+    }
   }
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      echo "Waiting for ADOT DaemonSet to be ready..."
-      kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 -n monitoring --timeout=300s || true
-      
-      echo "Restarting ADOT DaemonSet..."
-      kubectl rollout restart daemonset/adot-collector-daemonset -n monitoring || true
-      
-      echo "Waiting for rollout to complete..."
-      kubectl rollout status daemonset/adot-collector-daemonset -n monitoring --timeout=300s || true
-      
-      echo "ADOT pods status:"
-      kubectl get pods -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2
-    EOT
+  spec {
+    selector = {
+      app = "kube-state-metrics"
+    }
+
+    port {
+      name        = "http-metrics"
+      port        = 8080
+      target_port = 8080
+    }
+
+    port {
+      name        = "telemetry"
+      port        = 8081
+      target_port = 8081
+    }
+
+    type = "ClusterIP"
+  }
+}
+
+# =============================================================================
+# CLUSTER ROLE AND BINDING FOR PROMETHEUS
+# =============================================================================
+
+resource "kubernetes_cluster_role" "prometheus" {
+  metadata {
+    name = "prometheus"
   }
 
-  depends_on = [
-    helm_release.adot_collector
-  ]
+  rule {
+    api_groups = [""]
+    resources  = ["nodes", "nodes/proxy", "services", "endpoints", "pods"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rule {
+    api_groups = ["extensions"]
+    resources  = ["ingresses"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rule {
+    non_resource_urls = ["/metrics"]
+    verbs             = ["get"]
+  }
 }
 
-# =============================================================================
-# STEP 7: CREATE IAM PERMISSIONS FOR GRAFANA TO ACCESS AMP
-# =============================================================================
+resource "kubernetes_cluster_role_binding" "prometheus" {
+  metadata {
+    name = "prometheus"
+  }
 
-resource "aws_iam_role" "grafana_role" {
-  name = "eks-grafana-amp-role"
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "ClusterRole"
+    name      = kubernetes_cluster_role.prometheus.metadata[0].name
+  }
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "grafana.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy" "grafana_amp_policy" {
-  name = "GrafanaAMPPolicy"
-  role = aws_iam_role.grafana_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "aps:ListWorkspaces",
-          "aps:DescribeWorkspace",
-          "aps:QueryMetrics",
-          "aps:GetLabels",
-          "aps:GetSeries",
-          "aps:GetMetricMetadata"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
+  subject {
+    kind      = "ServiceAccount"
+    name      = kubernetes_service_account.prometheus.metadata[0].name
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+  }
 }
 
 # =============================================================================
 # OUTPUTS
 # =============================================================================
 
-output "prometheus_workspace_id" {
-  description = "Amazon Managed Prometheus workspace ID"
-  value       = aws_prometheus_workspace.this.id
+output "amp_workspace_id" {
+  description = "The ID of the AMP workspace"
+  value       = aws_prometheus_workspace.amp.id
 }
 
-output "prometheus_endpoint" {
-  description = "Amazon Managed Prometheus endpoint"
-  value       = aws_prometheus_workspace.this.prometheus_endpoint
+output "amp_workspace_arn" {
+  description = "The ARN of the AMP workspace"
+  value       = aws_prometheus_workspace.amp.arn
 }
 
-output "amp_prometheus_role_arn" {
-  description = "IAM role ARN for AMP Prometheus"
-  value       = aws_iam_role.amp_prometheus_role.arn
+output "amp_prometheus_endpoint" {
+  description = "The Prometheus endpoint URL for the AMP workspace"
+  value       = aws_prometheus_workspace.amp.prometheus_endpoint
 }
 
-output "grafana_role_arn" {
-  description = "IAM role ARN for Grafana"
-  value       = aws_iam_role.grafana_role.arn
+output "prometheus_service_account_role_arn" {
+  description = "The ARN of the IAM role for Prometheus service account"
+  value       = aws_iam_role.prometheus_service_account.arn
 }
 
-output "validation_commands" {
-  description = "Commands to validate the setup"
-  value = <<-EOT
-# === BASIC VALIDATION COMMANDS ===
+output "monitoring_namespace" {
+  description = "The Kubernetes namespace where monitoring components are deployed"
+  value       = kubernetes_namespace.monitoring.metadata[0].name
+}
 
-# 1. Check AMP workspace
-aws amp describe-workspace --workspace-id ${aws_prometheus_workspace.this.id} --region ${var.aws_region}
+# From your existing EKS outputs (include these in your main EKS configuration)
+output "cluster_name" {
+  description = "The name of the EKS cluster"
+  value       = data.aws_eks_cluster.existing.name
+}
 
-# 2. Check ADOT pods
-kubectl get pods -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2
+output "cluster_endpoint" {
+  description = "The endpoint of the EKS cluster"
+  value       = data.aws_eks_cluster.existing.endpoint
+}
 
-# 3. Check ADOT logs for errors
-kubectl logs -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 --tail=20
+output "eks_cluster_arn" {
+  description = "The ARN of the EKS cluster"
+  value       = data.aws_eks_cluster.existing.arn
+}
 
-# 4. Check ConfigMap
-kubectl get configmap adot-conf -n monitoring -o yaml
+output "eks_cluster_version" {
+  description = "The version of the EKS cluster"
+  value       = data.aws_eks_cluster.existing.version
+}
 
-# 5. Test AMP connectivity
-aws amp query-metrics --workspace-id ${aws_prometheus_workspace.this.id} --region ${var.aws_region} --query-string 'up' --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ) --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-# === TROUBLESHOOTING COMMANDS ===
-
-# Check for scrape errors
-kubectl logs -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 --tail=100 | grep "Failed to scrape"
-
-# Check for export errors  
-kubectl logs -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 --tail=100 | grep "Exporting failed"
-
-# Test service connectivity
-kubectl exec -n monitoring -c adot-collector-container $(kubectl get pods -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 -o jsonpath='{.items[0].metadata.name}') -- /bin/sh -c "timeout 5 cat < /dev/tcp/kube-state-metrics/8080" && echo "kube-state-metrics reachable" || echo "kube-state-metrics NOT reachable"
-  EOT
+output "eks_cluster_oidc_issuer" {
+  description = "The OIDC issuer URL for the EKS cluster"
+  value       = data.aws_eks_cluster.existing.identity[0].oidc[0].issuer
 }
