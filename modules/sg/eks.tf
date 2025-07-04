@@ -3,7 +3,7 @@
 data "aws_vpc" "pw_vpc" {
   filter {
     name   = "tag:Name"
-    values = ["bsp-vpc-${var.env}"]
+    values = ["pw-vpc-${var.env}"]
   }
 }
 
