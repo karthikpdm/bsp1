@@ -1576,22 +1576,22 @@ resource "null_resource" "restart_adot_pods" {
 # # STEP 6: CREATE AMAZON MANAGED GRAFANA FOR DASHBOARDS
 # # =============================================================================
 
-# resource "aws_grafana_workspace" "this" {
-#   count = 0  # Temporarily disabled due to duplicate workspace issue
+resource "aws_grafana_workspace" "this" {
+  count = 0  # Temporarily disabled due to duplicate workspace issue
   
-#   account_access_type      = "CURRENT_ACCOUNT"
-#   authentication_providers = ["AWS_SSO"]
-#   permission_type          = "SERVICE_MANAGED"
-#   name                     = "eks-grafana-workspace"
-#   description              = "Managed Grafana for EKS monitoring"
-#   data_sources             = ["PROMETHEUS"]
-#   role_arn                 = aws_iam_role.grafana_role.arn
+  account_access_type      = "CURRENT_ACCOUNT"
+  authentication_providers = ["AWS_SSO"]
+  permission_type          = "SERVICE_MANAGED"
+  name                     = "eks-grafana-workspace"
+  description              = "Managed Grafana for EKS monitoring"
+  data_sources             = ["PROMETHEUS"]
+  role_arn                 = aws_iam_role.grafana_role.arn
 
-#   tags = {
-#     Environment = "prod"
-#     Project     = "eks-monitoring"
-#   }
-# }
+  tags = {
+    Environment = "prod"
+    Project     = "eks-monitoring"
+  }
+}
 
 # =============================================================================
 # STEP 7: CREATE IAM PERMISSIONS FOR GRAFANA TO ACCESS AMP
