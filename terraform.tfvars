@@ -1,11 +1,11 @@
-project_name     =  "bsp"
+project_name     =  "pw"
 region           = "us-east-1"
 env                  = "poc"
 
 #tags
 map_tagging = {
   track         = "devops"
-  project       = "bsp"
+  project       = "pw"
   env           = "poc"
 }
 
@@ -23,7 +23,9 @@ eks_version      = "1.32"  # Replace with your desired EKS version
 # karpenter_vcpu    = "10"
 # karpenter_memory  = "100"
 
-account_id  = "256482947245"
+# account_id  = "256482947245"
+# 730335309831
+account_id  = "730335309831"
 
 ################################################################################################
 # Security Group Rules
