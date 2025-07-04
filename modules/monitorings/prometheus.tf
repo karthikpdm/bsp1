@@ -1220,7 +1220,7 @@ variable "oidc_provider_arn" {
 variable "aws_region" {
   description = "AWS region where resources will be created"
   type        = string
-  default     = "us-west-2"
+  default     = "us-east-1"  # Changed to match your actual region
 }
 
 # =============================================================================
@@ -1368,7 +1368,7 @@ resource "null_resource" "cleanup_existing_configmap" {
 }
 
 # =============================================================================
-# STEP 5D: CREATE CORRECT CONFIGMAP FIRST
+# STEP 5D: CREATE FIXED CONFIGMAP WITH PROPER CONFIGURATION
 # =============================================================================
 
 resource "kubernetes_config_map" "adot_config_correct" {
@@ -1390,6 +1390,15 @@ resource "kubernetes_config_map" "adot_config_correct" {
       "meta.helm.sh/release-namespace" = "monitoring"
       "managed-by"                     = "terraform"
     }
+  }
+
+  # Add lifecycle management to handle recreation properly
+  lifecycle {
+    create_before_destroy = false
+    ignore_changes = [
+      metadata[0].resource_version,
+      metadata[0].uid
+    ]
   }
 
   data = {
@@ -1414,9 +1423,10 @@ resource "kubernetes_config_map" "adot_config_correct" {
             }
             scrape_configs = [
               {
-                job_name     = "kubernetes-pods"
-                sample_limit = 10000
-                metrics_path = "/metrics"
+                job_name         = "kubernetes-pods"
+                honor_timestamps = false  # CRITICAL: Fixes out-of-order timestamp issues
+                sample_limit     = 10000
+                metrics_path     = "/metrics"
                 kubernetes_sd_configs = [
                   { role = "pod" }
                 ]
@@ -1432,18 +1442,20 @@ resource "kubernetes_config_map" "adot_config_correct" {
                     regex         = "(.+)"
                     target_label  = "__metrics_path__"
                   },
+                  # FIXED: Proper regex replacement syntax
                   {
                     source_labels = ["__address__", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
                     action        = "replace"
                     regex         = "([^:]+)(?::\\d+)?;(\\d+)"
-                    replacement   = "$1:$2"
+                    replacement   = "${1}:${2}"  # FIXED: Use ${1} instead of $1
                     target_label  = "__address__"
                   },
+                  # Add default port for pods without port annotation
                   {
                     source_labels = ["__address__"]
                     regex         = "([^:]+):$"
                     target_label  = "__address__"
-                    replacement   = "$1:8080"
+                    replacement   = "${1}:8080"  # FIXED: Use ${1} instead of $1
                   },
                   {
                     action = "labelmap"
@@ -1459,6 +1471,7 @@ resource "kubernetes_config_map" "adot_config_correct" {
                     action        = "replace"
                     target_label  = "kubernetes_pod_name"
                   },
+                  # FIXED: Ensure instance label is properly set
                   {
                     source_labels = ["__address__"]
                     action        = "replace"
@@ -1477,6 +1490,7 @@ resource "kubernetes_config_map" "adot_config_correct" {
         "batch/metrics" = {
           timeout         = "60s"
           send_batch_size = 1000
+          send_batch_max_size = 1500
         }
       }
       exporters = {
@@ -1493,12 +1507,19 @@ resource "kubernetes_config_map" "adot_config_correct" {
           }
           sending_queue = {
             enabled      = true
-            num_consumers = 10
-            queue_size   = 5000
+            num_consumers = 5    # REDUCED: From 10 to 5 to reduce memory pressure
+            queue_size   = 1000  # REDUCED: From 5000 to 1000
           }
           timeout = "30s"
           resource_to_telemetry_conversion = {
             enabled = false
+          }
+          # ADDED: Additional configuration to handle AMP better
+          remote_write_queue = {
+            capacity = 2500
+            max_shards = 200
+            min_shards = 1
+            max_samples_per_send = 500
           }
         }
       }
@@ -1546,7 +1567,7 @@ resource "helm_release" "adot_collector" {
         }
       }
 
-      # Disable default ConfigMap creation
+      # Disable default ConfigMap creation to prevent conflicts
       configMap = {
         create = false
       }
@@ -1571,7 +1592,7 @@ resource "null_resource" "restart_adot_pods" {
   provisioner "local-exec" {
     command = <<-EOT
       echo "Waiting for ADOT DaemonSet to be ready..."
-      kubectl wait --for=condition=ready pod -l app=opentelemetry -n monitoring --timeout=300s || true
+      kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 -n monitoring --timeout=300s || true
       
       echo "Restarting ADOT DaemonSet..."
       kubectl rollout restart daemonset/adot-collector-daemonset -n monitoring || true
@@ -1580,7 +1601,7 @@ resource "null_resource" "restart_adot_pods" {
       kubectl rollout status daemonset/adot-collector-daemonset -n monitoring --timeout=300s || true
       
       echo "ADOT pods status:"
-      kubectl get pods -n monitoring -l app=opentelemetry
+      kubectl get pods -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2
     EOT
   }
 
@@ -1660,16 +1681,32 @@ output "grafana_role_arn" {
 output "validation_commands" {
   description = "Commands to validate the setup"
   value = <<-EOT
-# Check AMP workspace
+# === BASIC VALIDATION COMMANDS ===
+
+# 1. Check AMP workspace
 aws amp describe-workspace --workspace-id ${aws_prometheus_workspace.this.id} --region ${var.aws_region}
 
-# Check ADOT pods
-kubectl get pods -n monitoring -l app=opentelemetry
+# 2. Check ADOT pods
+kubectl get pods -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2
 
-# Check ADOT logs
-kubectl logs -n monitoring -l app=opentelemetry --tail=20
+# 3. Check ADOT logs for errors
+kubectl logs -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 --tail=20
 
-# Test metrics ingestion
-kubectl exec -n monitoring deployment/kube-state-metrics -- wget -qO- http://localhost:8080/metrics | head -5
+# 4. Check ConfigMap
+kubectl get configmap adot-conf -n monitoring -o yaml
+
+# 5. Test AMP connectivity
+aws amp query-metrics --workspace-id ${aws_prometheus_workspace.this.id} --region ${var.aws_region} --query-string 'up' --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ) --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# === TROUBLESHOOTING COMMANDS ===
+
+# Check for scrape errors
+kubectl logs -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 --tail=100 | grep "Failed to scrape"
+
+# Check for export errors  
+kubectl logs -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 --tail=100 | grep "Exporting failed"
+
+# Test service connectivity
+kubectl exec -n monitoring -c adot-collector-container $(kubectl get pods -n monitoring -l app.kubernetes.io/name=adot-exporter-for-eks-on-ec2 -o jsonpath='{.items[0].metadata.name}') -- /bin/sh -c "timeout 5 cat < /dev/tcp/kube-state-metrics/8080" && echo "kube-state-metrics reachable" || echo "kube-state-metrics NOT reachable"
   EOT
 }
