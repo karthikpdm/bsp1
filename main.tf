@@ -123,19 +123,19 @@ provider "helm" {
 }
 
 # Monitoring module - will use the providers configured above
-module "monitoring" {
-  source = "./modules/monitorings"
+# module "monitoring" {
+#   source = "./modules/monitorings"
   
-  eks_cluster_name         = module.eks.cluster_name
-  eks_cluster_oidc_issuer  = module.eks.eks_cluster_oidc_issuer
-  oidc_provider_arn        = module.eks.oidc_provider_arn
-  aws_region               = data.aws_region.current.name
-  # cluster_endpoint       = module.eks.cluster_endpoint
-  # cluster_ca_certificate = module.eks.cluster_ca_certificate
+#   eks_cluster_name         = module.eks.cluster_name
+#   eks_cluster_oidc_issuer  = module.eks.eks_cluster_oidc_issuer
+#   oidc_provider_arn        = module.eks.oidc_provider_arn
+#   aws_region               = data.aws_region.current.name
+#   # cluster_endpoint       = module.eks.cluster_endpoint
+#   # cluster_ca_certificate = module.eks.cluster_ca_certificate
   
-  # Ensure monitoring runs after EKS is ready
-  # depends_on = [module.eks]
-}
+#   # Ensure monitoring runs after EKS is ready
+#   # depends_on = [module.eks]
+# }
 
 # module "monitoring" {
 #   source = "./modules/monitorings"
