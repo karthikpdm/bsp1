@@ -140,7 +140,7 @@
 # Creation of the EC2 instance for hosting Istio + Keycloak
 resource "aws_eks_node_group" "osdu_ir_istio_node" {
   cluster_name    = aws_eks_cluster.eks.name
-  node_group_name = "bsp-eks-istio-node-${var.env}"
+  node_group_name = "pw-eks-istio-node-${var.env}"
   node_role_arn   = var.worker_role_arn
   subnet_ids      = [data.aws_subnet.private_subnet_az1.id, data.aws_subnet.private_subnet_az2.id]
 
@@ -186,7 +186,7 @@ resource "aws_eks_node_group" "osdu_ir_istio_node" {
 # Creation of the EC2 instance for hosting MinIO + PostgreSQL + Elasticsearch + RabbitMQ
 resource "aws_eks_node_group" "osdu_ir_backend_node" {
   cluster_name    = aws_eks_cluster.eks.name
-  node_group_name = "bsp-eks-backend-nodes-${var.env}"
+  node_group_name = "pw-eks-backend-nodes-${var.env}"
   # name = "${var.project_name}-eks-backend-nodes-${var.env}"
   node_role_arn   = var.worker_role_arn
   subnet_ids      = [data.aws_subnet.private_subnet_az1.id, data.aws_subnet.private_subnet_az2.id]
@@ -234,7 +234,7 @@ resource "aws_eks_node_group" "osdu_ir_backend_node" {
 # ✅ OPTIMIZED: Creation of the EC2 instance for hosting OSDU Microservices + Airflow + Redis (UNTAINTED)
 resource "aws_eks_node_group" "osdu_ir_frontend_node" {
   cluster_name    = aws_eks_cluster.eks.name
-  node_group_name = "bsp-eks-frontend-node-${var.env}"
+  node_group_name = "pw-eks-frontend-node-${var.env}"
   node_role_arn   = var.worker_role_arn
   subnet_ids      = [data.aws_subnet.private_subnet_az1.id, data.aws_subnet.private_subnet_az2.id]
 

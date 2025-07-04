@@ -6,35 +6,35 @@
 data "aws_vpc" "existing_vpc" {
   filter {
     name   = "tag:Name"
-    values = ["bsp-vpc-${var.env}"]
+    values = ["pw-vpc-${var.env}"]
   }
 }
 
 data "aws_subnet" "private_subnet_az1" {
   filter {
     name   = "tag:Name"
-    values = ["bsp-private-subnet-az1-${var.env}"]
+    values = ["pw-private-subnet-az1-${var.env}"]
   }
 }
 
 data "aws_subnet" "private_subnet_az2" {
   filter {
     name   = "tag:Name"
-    values = ["bsp-private-subnet-az2-${var.env}"]
+    values = ["pw-private-subnet-az2-${var.env}"]
   }
 }
 
 data "aws_subnet" "public_subnet_az1" {
   filter {
     name   = "tag:Name"
-    values = ["bsp-public-subnet-az1-${var.env}"]  
+    values = ["pw-public-subnet-az1-${var.env}"]  
   }
 }
 
 data "aws_subnet" "public_subnet_az2" {
   filter {
     name   = "tag:Name"
-    values = ["bsp-public-subnet-az2-${var.env}"]  
+    values = ["pw-public-subnet-az2-${var.env}"]  
   }
 }
 
