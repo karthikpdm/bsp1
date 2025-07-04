@@ -1389,6 +1389,39 @@ resource "helm_release" "adot_collector" {
   ]
 }
 
+
+
+# Add this BEFORE your kubernetes_config_map resource
+resource "null_resource" "cleanup_helm_configmap" {
+  triggers = {
+    # This ensures it runs when the Helm release changes
+    helm_release_revision = helm_release.adot_collector.metadata[0].revision
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "Checking for existing ConfigMap created by Helm..."
+      
+      # Wait for helm release to be ready
+      kubectl wait --for=condition=deployed helmrelease/adot-collector -n monitoring --timeout=300s || true
+      
+      # Check if ConfigMap exists and is managed by Helm
+      if kubectl get configmap adot-conf -n monitoring -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null | grep -q "adot-collector"; then
+        echo "Found Helm-managed ConfigMap adot-conf, deleting it..."
+        kubectl delete configmap adot-conf -n monitoring
+        echo "ConfigMap deleted successfully"
+        sleep 3
+      else
+        echo "No Helm-managed ConfigMap found or already managed by Terraform"
+      fi
+    EOT
+  }
+
+  depends_on = [
+    helm_release.adot_collector
+  ]
+}
+
 # =============================================================================
 # STEP 5D: CREATE CORRECT CONFIGMAP TO OVERRIDE ADOT CONFIGURATION
 # =============================================================================
@@ -1513,9 +1546,10 @@ resource "kubernetes_config_map" "adot_config_correct" {
       }
     })
   }
-
+ 
   depends_on = [
-    helm_release.adot_collector
+    helm_release.adot_collector,
+    null_resource.cleanup_helm_configmap
   ]
 }
 
