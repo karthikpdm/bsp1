@@ -1291,12 +1291,6 @@ resource "aws_iam_role_policy_attachment" "attach_amp_policy" {
 # STEP 4: CREATE KUBERNETES NAMESPACE AND SERVICE ACCOUNT
 # =============================================================================
 
-# resource "kubernetes_namespace" "monitoring" {
-#   metadata {
-#     name = "monitoring"
-#   }
-# }
-
 resource "kubernetes_service_account" "amp_prometheus_sa" {
   metadata {
     name      = "amp-prometheus-sa"
@@ -1355,75 +1349,26 @@ resource "helm_release" "node_exporter" {
 }
 
 # =============================================================================
-# STEP 5C: DEPLOY ADOT COLLECTOR - SIMPLE APPROACH THAT WORKS
+# STEP 5C: CLEANUP EXISTING CONFIGMAP BEFORE ADOT DEPLOYMENT
 # =============================================================================
 
-resource "helm_release" "adot_collector" {
-  name       = "adot-collector"
-  chart      = "adot-exporter-for-eks-on-ec2"
-  repository = "https://aws-observability.github.io/aws-otel-helm-charts"
-  namespace  = "monitoring"
+resource "null_resource" "cleanup_existing_configmap" {
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "Cleaning up any existing ConfigMap..."
+      kubectl delete configmap adot-conf -n monitoring --ignore-not-found=true
+      echo "Cleanup completed"
+    EOT
+  }
 
   depends_on = [
     helm_release.kube_state_metrics,
     helm_release.node_exporter
   ]
-
-  # SIMPLE working configuration - no schema conflicts
-  values = [
-    yamlencode({
-      awsRegion   = var.aws_region
-      clusterName = var.eks_cluster_name
-
-      adotCollector = {
-        daemonSet = {
-          namespace       = "monitoring"
-          createNamespace = false
-          serviceAccount = {
-            create = false
-            name   = kubernetes_service_account.amp_prometheus_sa.metadata[0].name
-          }
-        }
-      }
-    })
-  ]
-}
-
-
-
-# Add this BEFORE your kubernetes_config_map resource
-resource "null_resource" "cleanup_helm_configmap" {
-  triggers = {
-    # This ensures it runs when the Helm release changes
-    helm_release_revision = helm_release.adot_collector.metadata[0].revision
-  }
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      echo "Checking for existing ConfigMap created by Helm..."
-      
-      # Wait for helm release to be ready
-      kubectl wait --for=condition=deployed helmrelease/adot-collector -n monitoring --timeout=300s || true
-      
-      # Check if ConfigMap exists and is managed by Helm
-      if kubectl get configmap adot-conf -n monitoring -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null | grep -q "adot-collector"; then
-        echo "Found Helm-managed ConfigMap adot-conf, deleting it..."
-        kubectl delete configmap adot-conf -n monitoring
-        echo "ConfigMap deleted successfully"
-        sleep 3
-      else
-        echo "No Helm-managed ConfigMap found or already managed by Terraform"
-      fi
-    EOT
-  }
-
-  depends_on = [
-    helm_release.adot_collector
-  ]
 }
 
 # =============================================================================
-# STEP 5D: CREATE CORRECT CONFIGMAP TO OVERRIDE ADOT CONFIGURATION
+# STEP 5D: CREATE CORRECT CONFIGMAP FIRST
 # =============================================================================
 
 resource "kubernetes_config_map" "adot_config_correct" {
@@ -1443,16 +1388,8 @@ resource "kubernetes_config_map" "adot_config_correct" {
     annotations = {
       "meta.helm.sh/release-name"      = "adot-collector"
       "meta.helm.sh/release-namespace" = "monitoring"
+      "managed-by"                     = "terraform"
     }
-  }
-
-
-   # ADD THESE LIFECYCLE RULES
-  lifecycle {
-    replace_triggered_by = [
-      helm_release.adot_collector
-    ]
-    create_before_destroy = true
   }
 
   data = {
@@ -1470,10 +1407,14 @@ resource "kubernetes_config_map" "adot_config_correct" {
             global = {
               scrape_interval = "30s"
               scrape_timeout  = "10s"
+              external_labels = {
+                cluster = var.eks_cluster_name
+                region  = var.aws_region
+              }
             }
             scrape_configs = [
               {
-                job_name     = "k8s_metrics_scrape"
+                job_name     = "kubernetes-pods"
                 sample_limit = 10000
                 metrics_path = "/metrics"
                 kubernetes_sd_configs = [
@@ -1499,18 +1440,29 @@ resource "kubernetes_config_map" "adot_config_correct" {
                     target_label  = "__address__"
                   },
                   {
+                    source_labels = ["__address__"]
+                    regex         = "([^:]+):$"
+                    target_label  = "__address__"
+                    replacement   = "$1:8080"
+                  },
+                  {
                     action = "labelmap"
                     regex  = "__meta_kubernetes_pod_label_(.+)"
                   },
                   {
                     source_labels = ["__meta_kubernetes_namespace"]
                     action        = "replace"
-                    target_label  = "K8S_NAMESPACE"
+                    target_label  = "kubernetes_namespace"
                   },
                   {
                     source_labels = ["__meta_kubernetes_pod_name"]
                     action        = "replace"
-                    target_label  = "K8S_POD_NAME"
+                    target_label  = "kubernetes_pod_name"
+                  },
+                  {
+                    source_labels = ["__address__"]
+                    action        = "replace"
+                    target_label  = "instance"
                   }
                 ]
               }
@@ -1519,8 +1471,12 @@ resource "kubernetes_config_map" "adot_config_correct" {
         }
       }
       processors = {
+        "memory_limiter" = {
+          limit_mib = 512
+        }
         "batch/metrics" = {
-          timeout = "60s"
+          timeout         = "60s"
+          send_batch_size = 1000
         }
       }
       exporters = {
@@ -1529,6 +1485,18 @@ resource "kubernetes_config_map" "adot_config_correct" {
           auth = {
             authenticator = "sigv4auth"
           }
+          retry_on_failure = {
+            enabled         = true
+            initial_interval = "5s"
+            max_interval    = "30s"
+            max_elapsed_time = "300s"
+          }
+          sending_queue = {
+            enabled      = true
+            num_consumers = 10
+            queue_size   = 5000
+          }
+          timeout = "30s"
           resource_to_telemetry_conversion = {
             enabled = false
           }
@@ -1539,58 +1507,86 @@ resource "kubernetes_config_map" "adot_config_correct" {
         pipelines = {
           metrics = {
             receivers  = ["prometheus"]
-            processors = ["batch/metrics"]
+            processors = ["memory_limiter", "batch/metrics"]
             exporters  = ["prometheusremotewrite"]
           }
         }
       }
     })
   }
- 
+
   depends_on = [
-    helm_release.adot_collector,
-    null_resource.cleanup_helm_configmap
+    null_resource.cleanup_existing_configmap
   ]
 }
 
 # =============================================================================
-# STEP 5E: RESTART ADOT PODS AFTER CONFIGMAP IS APPLIED
+# STEP 5E: DEPLOY ADOT COLLECTOR AFTER CONFIGMAP
 # =============================================================================
 
-resource "null_resource" "restart_adot_pods" {
-  triggers = {
-    config_hash = sha256(kubernetes_config_map.adot_config_correct.data["adot-config"])
-  }
+resource "helm_release" "adot_collector" {
+  name       = "adot-collector"
+  chart      = "adot-exporter-for-eks-on-ec2"
+  repository = "https://aws-observability.github.io/aws-otel-helm-charts"
+  namespace  = "monitoring"
 
-  provisioner "local-exec" {
-    # command = "kubectl rollout restart daemonset/adot-collector-daemonset -n ${kubernetes_namespace.monitoring.metadata[0].name}"
-    command = "kubectl rollout restart daemonset/adot-collector-daemonset -n monitoring"
-  }
+  values = [
+    yamlencode({
+      awsRegion   = var.aws_region
+      clusterName = var.eks_cluster_name
+
+      adotCollector = {
+        daemonSet = {
+          namespace       = "monitoring"
+          createNamespace = false
+          serviceAccount = {
+            create = false
+            name   = kubernetes_service_account.amp_prometheus_sa.metadata[0].name
+          }
+        }
+      }
+
+      # Disable default ConfigMap creation
+      configMap = {
+        create = false
+      }
+    })
+  ]
 
   depends_on = [
     kubernetes_config_map.adot_config_correct
   ]
 }
 
-# # =============================================================================
-# # STEP 6: CREATE AMAZON MANAGED GRAFANA FOR DASHBOARDS
-# # =============================================================================
+# =============================================================================
+# STEP 5F: RESTART ADOT PODS AFTER DEPLOYMENT
+# =============================================================================
 
-resource "aws_grafana_workspace" "this" {
-  count = 0  # Temporarily disabled due to duplicate workspace issue
-  
-  account_access_type      = "CURRENT_ACCOUNT"
-  authentication_providers = ["AWS_SSO"]
-  permission_type          = "SERVICE_MANAGED"
-  name                     = "eks-grafana-workspace"
-  description              = "Managed Grafana for EKS monitoring"
-  data_sources             = ["PROMETHEUS"]
-  role_arn                 = aws_iam_role.grafana_role.arn
-
-  tags = {
-    Environment = "prod"
-    Project     = "eks-monitoring"
+resource "null_resource" "restart_adot_pods" {
+  triggers = {
+    config_hash = sha256(kubernetes_config_map.adot_config_correct.data["adot-config"])
+    always_run  = timestamp()
   }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "Waiting for ADOT DaemonSet to be ready..."
+      kubectl wait --for=condition=ready pod -l app=opentelemetry -n monitoring --timeout=300s || true
+      
+      echo "Restarting ADOT DaemonSet..."
+      kubectl rollout restart daemonset/adot-collector-daemonset -n monitoring || true
+      
+      echo "Waiting for rollout to complete..."
+      kubectl rollout status daemonset/adot-collector-daemonset -n monitoring --timeout=300s || true
+      
+      echo "ADOT pods status:"
+      kubectl get pods -n monitoring -l app=opentelemetry
+    EOT
+  }
+
+  depends_on = [
+    helm_release.adot_collector
+  ]
 }
 
 # =============================================================================
@@ -1661,20 +1657,19 @@ output "grafana_role_arn" {
   value       = aws_iam_role.grafana_role.arn
 }
 
-output "manual_grafana_setup_instructions" {
-  description = "Manual steps to configure Grafana data source"
+output "validation_commands" {
+  description = "Commands to validate the setup"
   value = <<-EOT
-    Use your existing Grafana workspace at: g-5bf721b055.grafana-workspace.us-east-1.amazonaws.com
-    
-    To add AMP data source:
-    1. Go to Configuration → Data Sources → Add data source
-    2. Select: Prometheus
-    3. Configure:
-       - Name: AmazonManagedPrometheus
-       - URL: ${aws_prometheus_workspace.this.prometheus_endpoint}
-       - Auth: AWS Signature Version 4
-       - Default Region: ${var.aws_region}
-       - Assume Role ARN: ${aws_iam_role.grafana_role.arn}
-    4. Save & Test
+# Check AMP workspace
+aws amp describe-workspace --workspace-id ${aws_prometheus_workspace.this.id} --region ${var.aws_region}
+
+# Check ADOT pods
+kubectl get pods -n monitoring -l app=opentelemetry
+
+# Check ADOT logs
+kubectl logs -n monitoring -l app=opentelemetry --tail=20
+
+# Test metrics ingestion
+kubectl exec -n monitoring deployment/kube-state-metrics -- wget -qO- http://localhost:8080/metrics | head -5
   EOT
 }
