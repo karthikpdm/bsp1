@@ -1400,7 +1400,7 @@ resource "aws_eks_addon" "ebs-csi-driver" {
 
 
 
-#####################################################################################################################
+####################################################################################################################
 # Amazon Managed Service for Prometheus
 #####################################################################################################################
 
@@ -1503,21 +1503,8 @@ resource "kubernetes_namespace" "prometheus" {
   depends_on = [aws_eks_cluster.eks]
 }
 
-#####################################################################################################################
-# Kubernetes Service Account
-#####################################################################################################################
-
-resource "kubernetes_service_account" "amp_ingest_service_account" {
-  metadata {
-    name      = "amp-iamproxy-ingest-service-account"
-    namespace = kubernetes_namespace.prometheus.metadata[0].name
-    annotations = {
-      "eks.amazonaws.com/role-arn" = aws_iam_role.amp_ingest_role.arn
-    }
-  }
-
-  depends_on = [kubernetes_namespace.prometheus]
-}
+# Note: Service account will be created and managed by Helm chart
+# No separate Kubernetes service account resource needed
 
 #####################################################################################################################
 # Helm Release for Prometheus
@@ -1535,7 +1522,8 @@ resource "helm_release" "prometheus" {
     yamlencode({
       serviceAccounts = {
         server = {
-          name = kubernetes_service_account.amp_ingest_service_account.metadata[0].name
+          name = "amp-iamproxy-ingest-service-account"
+          create = true
           annotations = {
             "eks.amazonaws.com/role-arn" = aws_iam_role.amp_ingest_role.arn
           }
@@ -1737,7 +1725,7 @@ resource "helm_release" "prometheus" {
   ]
 
   depends_on = [
-    kubernetes_service_account.amp_ingest_service_account,
+    kubernetes_namespace.prometheus,
     aws_iam_role_policy_attachment.amp_ingest_policy_attachment,
     aws_prometheus_workspace.amp
   ]
@@ -1774,7 +1762,7 @@ output "prometheus_namespace" {
 
 output "prometheus_service_account" {
   description = "The Kubernetes service account for Prometheus"
-  value       = kubernetes_service_account.amp_ingest_service_account.metadata[0].name
+  value       = "amp-iamproxy-ingest-service-account"
 }
 
 output "eks_cluster_name" {
