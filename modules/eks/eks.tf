@@ -1573,7 +1573,7 @@ resource "helm_release" "prometheus" {
         # Data Retention
         retention = "15d"
 
-        # Remote Write Configuration for AMP
+        # Remove conflicting write_relabel_configs that were causing issues
         remoteWrite = [
           {
             url = "https://aps-workspaces.${data.aws_region.current.name}.amazonaws.com/workspaces/${aws_prometheus_workspace.amp.id}/api/v1/remote_write"
@@ -1585,13 +1585,6 @@ resource "helm_release" "prometheus" {
               max_shards          = 200
               capacity            = 2500
             }
-            write_relabel_configs = [
-              {
-                source_labels = ["__name__"]
-                regex         = "prometheus_.*"
-                action        = "drop"
-              }
-            ]
           }
         ]
 
@@ -1602,125 +1595,17 @@ resource "helm_release" "prometheus" {
           fsGroup    = 65534
         }
 
-        # Additional Arguments
-        extraArgs = {
-          "web.enable-lifecycle" = ""
-          "storage.tsdb.no-lockfile" = ""
-          "storage.tsdb.wal-compression" = ""
-        }
+        # Remove additional args that may conflict
+        extraArgs = {}
       }
 
-      # Basic Prometheus Configuration
-      serverFiles = {
-        "prometheus.yml" = {
-          global = {
-            scrape_interval     = "15s"
-            evaluation_interval = "15s"
-            external_labels = {
-              cluster = "my-project-eks-cluster-dev"
-              region  = data.aws_region.current.name
-            }
-          }
-
-          scrape_configs = [
-            # Kubernetes API Server
-            {
-              job_name = "kubernetes-apiservers"
-              kubernetes_sd_configs = [
-                {
-                  role = "endpoints"
-                }
-              ]
-              scheme = "https"
-              tls_config = {
-                ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-                insecure_skip_verify = false
-              }
-              bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-              relabel_configs = [
-                {
-                  source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_service_name", "__meta_kubernetes_endpoint_port_name"]
-                  action        = "keep"
-                  regex         = "default;kubernetes;https"
-                }
-              ]
-            },
-
-            # Kubernetes Nodes
-            {
-              job_name = "kubernetes-nodes"
-              kubernetes_sd_configs = [
-                {
-                  role = "node"
-                }
-              ]
-              scheme = "https"
-              tls_config = {
-                ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-                insecure_skip_verify = true
-              }
-              bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-              relabel_configs = [
-                {
-                  action = "labelmap"
-                  regex  = "__meta_kubernetes_node_label_(.+)"
-                }
-              ]
-            },
-
-            # Kubernetes cAdvisor
-            {
-              job_name = "kubernetes-cadvisor"
-              kubernetes_sd_configs = [
-                {
-                  role = "node"
-                }
-              ]
-              scheme = "https"
-              metrics_path = "/metrics/cadvisor"
-              tls_config = {
-                ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-                insecure_skip_verify = true
-              }
-              bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-              relabel_configs = [
-                {
-                  action = "labelmap"
-                  regex  = "__meta_kubernetes_node_label_(.+)"
-                }
-              ]
-            },
-
-            # Kubernetes Services
-            {
-              job_name = "kubernetes-service-endpoints"
-              kubernetes_sd_configs = [
-                {
-                  role = "endpoints"
-                }
-              ]
-              relabel_configs = [
-                {
-                  source_labels = ["__meta_kubernetes_service_annotation_prometheus_io_scrape"]
-                  action        = "keep"
-                  regex         = "true"
-                },
-                {
-                  source_labels = ["__meta_kubernetes_service_annotation_prometheus_io_path"]
-                  action        = "replace"
-                  target_label  = "__metrics_path__"
-                  regex         = "(.+)"
-                },
-                {
-                  source_labels = ["__address__", "__meta_kubernetes_service_annotation_prometheus_io_port"]
-                  action        = "replace"
-                  regex         = "([^:]+)(?::[0-9]+)?;([0-9]+)"
-                  replacement   = "$1:$2"
-                  target_label  = "__address__"
-                }
-              ]
-            }
-          ]
+      # Global configuration override
+      global = {
+        scrape_interval     = "15s"
+        evaluation_interval = "15s"
+        external_labels = {
+          cluster = "my-project-eks-cluster-dev"
+          region  = data.aws_region.current.name
         }
       }
 
