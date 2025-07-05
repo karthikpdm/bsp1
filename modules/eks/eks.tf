@@ -229,19 +229,19 @@ resource "aws_eks_addon" "kube-proxy" {
 
 
 
-data "aws_eks_addon_version" "coredns-default" {
-  addon_name         = "coredns"
-  kubernetes_version = aws_eks_cluster.eks.version
-}
+# data "aws_eks_addon_version" "coredns-default" {
+#   addon_name         = "coredns"
+#   kubernetes_version = aws_eks_cluster.eks.version
+# }
 
-resource "aws_eks_addon" "coredns" {
-  addon_name        = "coredns"
-  addon_version     = data.aws_eks_addon_version.coredns-default.version
-  resolve_conflicts_on_create = "OVERWRITE"
-  resolve_conflicts_on_update = "OVERWRITE"
-  cluster_name      = aws_eks_cluster.eks.name
+# resource "aws_eks_addon" "coredns" {
+#   addon_name        = "coredns"
+#   addon_version     = data.aws_eks_addon_version.coredns-default.version
+#   resolve_conflicts_on_create = "OVERWRITE"
+#   resolve_conflicts_on_update = "OVERWRITE"
+#   cluster_name      = aws_eks_cluster.eks.name
 
-}
+# }
 
 #######################################################################
 #oidc 
@@ -262,21 +262,21 @@ resource "aws_iam_openid_connect_provider" "eks" {
 
 #######################################################################
 
-# EBS CSI Driver addon
-data "aws_eks_addon_version" "ebs-csi-driver-default" {
-  addon_name         = "aws-ebs-csi-driver"
-  kubernetes_version = aws_eks_cluster.eks.version
-}
+# # EBS CSI Driver addon
+# data "aws_eks_addon_version" "ebs-csi-driver-default" {
+#   addon_name         = "aws-ebs-csi-driver"
+#   kubernetes_version = aws_eks_cluster.eks.version
+# }
 
 
-resource "aws_eks_addon" "ebs-csi-driver" {
-  addon_name               = "aws-ebs-csi-driver"
-  addon_version            = data.aws_eks_addon_version.ebs-csi-driver-default.version
-  resolve_conflicts_on_create = "OVERWRITE"
-  resolve_conflicts_on_update = "OVERWRITE"
-  cluster_name             = aws_eks_cluster.eks.name
-  service_account_role_arn = var.ebs_csi_driver_role_arn
-}
+# resource "aws_eks_addon" "ebs-csi-driver" {
+#   addon_name               = "aws-ebs-csi-driver"
+#   addon_version            = data.aws_eks_addon_version.ebs-csi-driver-default.version
+#   resolve_conflicts_on_create = "OVERWRITE"
+#   resolve_conflicts_on_update = "OVERWRITE"
+#   cluster_name             = aws_eks_cluster.eks.name
+#   service_account_role_arn = var.ebs_csi_driver_role_arn
+# }
 
 
 
