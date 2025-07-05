@@ -1400,7 +1400,7 @@ resource "aws_eks_addon" "ebs-csi-driver" {
 
 
 
-####################################################################################################################
+#####################################################################################################################
 # Amazon Managed Service for Prometheus
 #####################################################################################################################
 
@@ -1492,7 +1492,7 @@ resource "aws_iam_role_policy_attachment" "amp_ingest_policy_attachment" {
 }
 
 #####################################################################################################################
-# Kubernetes Namespace
+# Kubernetes Namespace and Storage
 #####################################################################################################################
 
 resource "kubernetes_namespace" "prometheus" {
@@ -1501,6 +1501,29 @@ resource "kubernetes_namespace" "prometheus" {
   }
 
   depends_on = [aws_eks_cluster.eks]
+}
+
+# Create StorageClass for EBS volumes
+resource "kubernetes_storage_class" "ebs_gp3" {
+  metadata {
+    name = "ebs-gp3-prometheus"
+    annotations = {
+      "storageclass.kubernetes.io/is-default-class" = "false"
+    }
+  }
+
+  storage_provisioner    = "ebs.csi.aws.com"
+  reclaim_policy        = "Delete"
+  volume_binding_mode   = "WaitForFirstConsumer"
+  allow_volume_expansion = true
+
+  parameters = {
+    type = "gp3"
+    encrypted = "true"
+    "csi.storage.k8s.io/fstype" = "ext4"
+  }
+
+  depends_on = [aws_eks_addon.ebs-csi-driver]
 }
 
 # Note: Service account will be created and managed by Helm chart
@@ -1548,6 +1571,8 @@ resource "helm_release" "prometheus" {
         persistentVolume = {
           enabled = true
           size    = "10Gi"
+          storageClass = kubernetes_storage_class.ebs_gp3.metadata[0].name
+          accessModes = ["ReadWriteOnce"]
         }
 
         resources = {
@@ -1726,6 +1751,7 @@ resource "helm_release" "prometheus" {
 
   depends_on = [
     kubernetes_namespace.prometheus,
+    kubernetes_storage_class.ebs_gp3,
     aws_iam_role_policy_attachment.amp_ingest_policy_attachment,
     aws_prometheus_workspace.amp
   ]
