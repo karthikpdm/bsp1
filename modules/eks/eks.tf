@@ -1419,7 +1419,6 @@ resource "aws_prometheus_workspace" "amp" {
 # IAM Role for Prometheus Ingestion
 #####################################################################################################################
 
-# IAM policy for AMP ingestion
 resource "aws_iam_policy" "amp_ingest_policy" {
   name        = "my-project-amp-ingest-policy-dev"
   path        = "/"
@@ -1448,7 +1447,6 @@ resource "aws_iam_policy" "amp_ingest_policy" {
   }
 }
 
-# Trust policy for the IAM role
 data "aws_iam_policy_document" "amp_ingest_assume_role_policy" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -1473,7 +1471,6 @@ data "aws_iam_policy_document" "amp_ingest_assume_role_policy" {
   }
 }
 
-# IAM role for Prometheus ingestion
 resource "aws_iam_role" "amp_ingest_role" {
   name               = "my-project-amp-ingest-role-dev"
   assume_role_policy = data.aws_iam_policy_document.amp_ingest_assume_role_policy.json
@@ -1485,14 +1482,13 @@ resource "aws_iam_role" "amp_ingest_role" {
   }
 }
 
-# Attach policy to role
 resource "aws_iam_role_policy_attachment" "amp_ingest_policy_attachment" {
   role       = aws_iam_role.amp_ingest_role.name
   policy_arn = aws_iam_policy.amp_ingest_policy.arn
 }
 
 #####################################################################################################################
-# Kubernetes Namespace and Storage
+# Kubernetes Resources
 #####################################################################################################################
 
 resource "kubernetes_namespace" "prometheus" {
@@ -1503,7 +1499,6 @@ resource "kubernetes_namespace" "prometheus" {
   depends_on = [aws_eks_cluster.eks]
 }
 
-# Create StorageClass for EBS volumes
 resource "kubernetes_storage_class" "ebs_gp3" {
   metadata {
     name = "ebs-gp3-prometheus"
@@ -1526,11 +1521,8 @@ resource "kubernetes_storage_class" "ebs_gp3" {
   depends_on = [aws_eks_addon.ebs-csi-driver]
 }
 
-# Note: Service account will be created and managed by Helm chart
-# No separate Kubernetes service account resource needed
-
 #####################################################################################################################
-# Helm Release for Prometheus
+# Helm Release for Prometheus with Fixed Configuration
 #####################################################################################################################
 
 resource "helm_release" "prometheus" {
@@ -1540,9 +1532,12 @@ resource "helm_release" "prometheus" {
   namespace  = kubernetes_namespace.prometheus.metadata[0].name
   version    = "25.8.0"
 
-  # Values for Prometheus configuration
+  # Force recreation if exists
+  recreate_pods = true
+  
   values = [
     yamlencode({
+      # Service Account Configuration
       serviceAccounts = {
         server = {
           name = "amp-iamproxy-ingest-service-account"
@@ -1553,21 +1548,9 @@ resource "helm_release" "prometheus" {
         }
       }
 
+      # Server Configuration
       server = {
-        remoteWrite = [
-          {
-            url = "https://aps-workspaces.${data.aws_region.current.name}.amazonaws.com/workspaces/${aws_prometheus_workspace.amp.id}/api/v1/remote_write"
-            sigv4 = {
-              region = data.aws_region.current.name
-            }
-            queue_config = {
-              max_samples_per_send = 1000
-              max_shards          = 200
-              capacity            = 2500
-            }
-          }
-        ]
-
+        # Persistent Volume Configuration
         persistentVolume = {
           enabled = true
           size    = "10Gi"
@@ -1575,6 +1558,7 @@ resource "helm_release" "prometheus" {
           accessModes = ["ReadWriteOnce"]
         }
 
+        # Resource Configuration
         resources = {
           limits = {
             cpu    = "1000m"
@@ -1586,18 +1570,60 @@ resource "helm_release" "prometheus" {
           }
         }
 
+        # Data Retention
         retention = "15d"
+
+        # Remote Write Configuration for AMP
+        remoteWrite = [
+          {
+            url = "https://aps-workspaces.${data.aws_region.current.name}.amazonaws.com/workspaces/${aws_prometheus_workspace.amp.id}/api/v1/remote_write"
+            sigv4 = {
+              region = data.aws_region.current.name
+            }
+            queue_config = {
+              max_samples_per_send = 1000
+              max_shards          = 200
+              capacity            = 2500
+            }
+            write_relabel_configs = [
+              {
+                source_labels = ["__name__"]
+                regex         = "prometheus_.*"
+                action        = "drop"
+              }
+            ]
+          }
+        ]
+
+        # Security Context
+        securityContext = {
+          runAsUser  = 65534
+          runAsGroup = 65534
+          fsGroup    = 65534
+        }
+
+        # Additional Arguments
+        extraArgs = {
+          "web.enable-lifecycle" = ""
+          "storage.tsdb.no-lockfile" = ""
+          "storage.tsdb.wal-compression" = ""
+        }
       }
 
-      # Configure scraping for EKS cluster metrics
+      # Basic Prometheus Configuration
       serverFiles = {
         "prometheus.yml" = {
           global = {
             scrape_interval     = "15s"
             evaluation_interval = "15s"
+            external_labels = {
+              cluster = "my-project-eks-cluster-dev"
+              region  = data.aws_region.current.name
+            }
           }
 
           scrape_configs = [
+            # Kubernetes API Server
             {
               job_name = "kubernetes-apiservers"
               kubernetes_sd_configs = [
@@ -1608,6 +1634,7 @@ resource "helm_release" "prometheus" {
               scheme = "https"
               tls_config = {
                 ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+                insecure_skip_verify = false
               }
               bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
               relabel_configs = [
@@ -1618,6 +1645,8 @@ resource "helm_release" "prometheus" {
                 }
               ]
             },
+
+            # Kubernetes Nodes
             {
               job_name = "kubernetes-nodes"
               kubernetes_sd_configs = [
@@ -1628,6 +1657,7 @@ resource "helm_release" "prometheus" {
               scheme = "https"
               tls_config = {
                 ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+                insecure_skip_verify = true
               }
               bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
               relabel_configs = [
@@ -1637,6 +1667,8 @@ resource "helm_release" "prometheus" {
                 }
               ]
             },
+
+            # Kubernetes cAdvisor
             {
               job_name = "kubernetes-cadvisor"
               kubernetes_sd_configs = [
@@ -1648,6 +1680,7 @@ resource "helm_release" "prometheus" {
               metrics_path = "/metrics/cadvisor"
               tls_config = {
                 ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+                insecure_skip_verify = true
               }
               bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
               relabel_configs = [
@@ -1657,6 +1690,8 @@ resource "helm_release" "prometheus" {
                 }
               ]
             },
+
+            # Kubernetes Services
             {
               job_name = "kubernetes-service-endpoints"
               kubernetes_sd_configs = [
@@ -1675,30 +1710,9 @@ resource "helm_release" "prometheus" {
                   action        = "replace"
                   target_label  = "__metrics_path__"
                   regex         = "(.+)"
-                }
-              ]
-            },
-            {
-              job_name = "kubernetes-pods"
-              kubernetes_sd_configs = [
-                {
-                  role = "pod"
-                }
-              ]
-              relabel_configs = [
-                {
-                  source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
-                  action        = "keep"
-                  regex         = "true"
                 },
                 {
-                  source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
-                  action        = "replace"
-                  target_label  = "__metrics_path__"
-                  regex         = "(.+)"
-                },
-                {
-                  source_labels = ["__address__", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
+                  source_labels = ["__address__", "__meta_kubernetes_service_annotation_prometheus_io_port"]
                   action        = "replace"
                   regex         = "([^:]+)(?::[0-9]+)?;([0-9]+)"
                   replacement   = "$1:$2"
@@ -1710,7 +1724,7 @@ resource "helm_release" "prometheus" {
         }
       }
 
-      # Disable components not needed for basic monitoring
+      # Disable unnecessary components
       alertmanager = {
         enabled = false
       }
@@ -1719,6 +1733,7 @@ resource "helm_release" "prometheus" {
         enabled = false
       }
 
+      # Enable node exporter
       nodeExporter = {
         enabled = true
         resources = {
@@ -1733,6 +1748,7 @@ resource "helm_release" "prometheus" {
         }
       }
 
+      # Enable kube-state-metrics
       kubeStateMetrics = {
         enabled = true
         resources = {
@@ -1745,6 +1761,11 @@ resource "helm_release" "prometheus" {
             memory = "100Mi"
           }
         }
+      }
+
+      # Network Policy (optional)
+      networkPolicy = {
+        enabled = false
       }
     })
   ]
@@ -1784,11 +1805,6 @@ output "amp_ingest_role_arn" {
 output "prometheus_namespace" {
   description = "The Kubernetes namespace where Prometheus is deployed"
   value       = kubernetes_namespace.prometheus.metadata[0].name
-}
-
-output "prometheus_service_account" {
-  description = "The Kubernetes service account for Prometheus"
-  value       = "amp-iamproxy-ingest-service-account"
 }
 
 output "eks_cluster_name" {
