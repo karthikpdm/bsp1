@@ -1595,305 +1595,305 @@ resource "time_sleep" "wait_for_calico" {
 
 
 
-# working
-# #####################################################################################################################
-# # Amazon Managed Service for Prometheus
-# #####################################################################################################################
+working
+#####################################################################################################################
+# Amazon Managed Service for Prometheus
+#####################################################################################################################
 
-# resource "aws_prometheus_workspace" "amp" {
-#   alias = "my-project-prometheus-dev"
+resource "aws_prometheus_workspace" "amp" {
+  alias = "my-project-prometheus-dev"
   
-#   tags = {
-#     Name        = "my-project-prometheus-workspace-dev"
-#     Environment = "dev"
-#     Project     = "my-project"
-#     ManagedBy   = "terraform"
-#   }
-# }
+  tags = {
+    Name        = "my-project-prometheus-workspace-dev"
+    Environment = "dev"
+    Project     = "my-project"
+    ManagedBy   = "terraform"
+  }
+}
 
-# #####################################################################################################################
-# # IAM Role for Prometheus Ingestion
-# #####################################################################################################################
+#####################################################################################################################
+# IAM Role for Prometheus Ingestion
+#####################################################################################################################
 
-# resource "aws_iam_policy" "amp_ingest_policy" {
-#   name        = "my-project-amp-ingest-policy-dev"
-#   path        = "/"
-#   description = "IAM policy for ingesting metrics to Amazon Managed Service for Prometheus"
+resource "aws_iam_policy" "amp_ingest_policy" {
+  name        = "my-project-amp-ingest-policy-dev"
+  path        = "/"
+  description = "IAM policy for ingesting metrics to Amazon Managed Service for Prometheus"
 
-#   policy = jsonencode({
-#     Version = "2012-10-17"
-#     Statement = [
-#       {
-#         Effect = "Allow"
-#         Action = [
-#           "aps:RemoteWrite",
-#           "aps:GetSeries",
-#           "aps:GetLabels",
-#           "aps:GetMetricMetadata"
-#         ]
-#         Resource = aws_prometheus_workspace.amp.arn
-#       }
-#     ]
-#   })
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "aps:RemoteWrite",
+          "aps:GetSeries",
+          "aps:GetLabels",
+          "aps:GetMetricMetadata"
+        ]
+        Resource = aws_prometheus_workspace.amp.arn
+      }
+    ]
+  })
 
-#   tags = {
-#     Environment = "dev"
-#     Project     = "my-project"
-#     ManagedBy   = "terraform"
-#   }
-# }
+  tags = {
+    Environment = "dev"
+    Project     = "my-project"
+    ManagedBy   = "terraform"
+  }
+}
 
-# data "aws_iam_policy_document" "amp_ingest_assume_role_policy" {
-#   statement {
-#     actions = ["sts:AssumeRoleWithWebIdentity"]
-#     effect  = "Allow"
+data "aws_iam_policy_document" "amp_ingest_assume_role_policy" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    effect  = "Allow"
 
-#     condition {
-#       test     = "StringEquals"
-#       variable = "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub"
-#       values   = ["system:serviceaccount:prometheus:amp-iamproxy-ingest-service-account"]
-#     }
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub"
+      values   = ["system:serviceaccount:prometheus:amp-iamproxy-ingest-service-account"]
+    }
 
-#     condition {
-#       test     = "StringEquals"
-#       variable = "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:aud"
-#       values   = ["sts.amazonaws.com"]
-#     }
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
 
-#     principals {
-#       identifiers = [aws_iam_openid_connect_provider.eks.arn]
-#       type        = "Federated"
-#     }
-#   }
-# }
+    principals {
+      identifiers = [aws_iam_openid_connect_provider.eks.arn]
+      type        = "Federated"
+    }
+  }
+}
 
-# resource "aws_iam_role" "amp_ingest_role" {
-#   name               = "my-project-amp-ingest-role-dev"
-#   assume_role_policy = data.aws_iam_policy_document.amp_ingest_assume_role_policy.json
+resource "aws_iam_role" "amp_ingest_role" {
+  name               = "my-project-amp-ingest-role-dev"
+  assume_role_policy = data.aws_iam_policy_document.amp_ingest_assume_role_policy.json
 
-#   tags = {
-#     Environment = "dev"
-#     Project     = "my-project"
-#     ManagedBy   = "terraform"
-#   }
-# }
+  tags = {
+    Environment = "dev"
+    Project     = "my-project"
+    ManagedBy   = "terraform"
+  }
+}
 
-# resource "aws_iam_role_policy_attachment" "amp_ingest_policy_attachment" {
-#   role       = aws_iam_role.amp_ingest_role.name
-#   policy_arn = aws_iam_policy.amp_ingest_policy.arn
-# }
+resource "aws_iam_role_policy_attachment" "amp_ingest_policy_attachment" {
+  role       = aws_iam_role.amp_ingest_role.name
+  policy_arn = aws_iam_policy.amp_ingest_policy.arn
+}
 
-# #####################################################################################################################
-# # Kubernetes Resources
-# #####################################################################################################################
+#####################################################################################################################
+# Kubernetes Resources
+#####################################################################################################################
 
-# resource "kubernetes_namespace" "prometheus" {
-#   metadata {
-#     name = "prometheus"
-#   }
+resource "kubernetes_namespace" "prometheus" {
+  metadata {
+    name = "prometheus"
+  }
 
-#   depends_on = [aws_eks_cluster.eks]
-# }
+  depends_on = [aws_eks_cluster.eks]
+}
 
-# resource "kubernetes_storage_class" "ebs_gp3" {
-#   metadata {
-#     name = "ebs-gp3-prometheus"
-#     annotations = {
-#       "storageclass.kubernetes.io/is-default-class" = "false"
-#     }
-#   }
+resource "kubernetes_storage_class" "ebs_gp3" {
+  metadata {
+    name = "ebs-gp3-prometheus"
+    annotations = {
+      "storageclass.kubernetes.io/is-default-class" = "false"
+    }
+  }
 
-#   storage_provisioner    = "ebs.csi.aws.com"
-#   reclaim_policy        = "Delete"
-#   volume_binding_mode   = "WaitForFirstConsumer"
-#   allow_volume_expansion = true
+  storage_provisioner    = "ebs.csi.aws.com"
+  reclaim_policy        = "Delete"
+  volume_binding_mode   = "WaitForFirstConsumer"
+  allow_volume_expansion = true
 
-#   parameters = {
-#     type = "gp3"
-#     encrypted = "true"
-#     "csi.storage.k8s.io/fstype" = "ext4"
-#   }
+  parameters = {
+    type = "gp3"
+    encrypted = "true"
+    "csi.storage.k8s.io/fstype" = "ext4"
+  }
 
-#   depends_on = [aws_eks_addon.ebs-csi-driver]
-# }
+  depends_on = [aws_eks_addon.ebs-csi-driver]
+}
 
-# #####################################################################################################################
-# # Helm Release for Prometheus with Fixed Configuration
-# #####################################################################################################################
+#####################################################################################################################
+# Helm Release for Prometheus with Fixed Configuration
+#####################################################################################################################
 
-# resource "helm_release" "prometheus" {
-#   name       = "prometheus"
-#   repository = "https://prometheus-community.github.io/helm-charts"
-#   chart      = "prometheus"
-#   namespace  = kubernetes_namespace.prometheus.metadata[0].name
-#   version    = "25.8.0"
+resource "helm_release" "prometheus" {
+  name       = "prometheus"
+  repository = "https://prometheus-community.github.io/helm-charts"
+  chart      = "prometheus"
+  namespace  = kubernetes_namespace.prometheus.metadata[0].name
+  version    = "25.8.0"
 
-#   # Force recreation if exists
-#   recreate_pods = true
+  # Force recreation if exists
+  recreate_pods = true
   
-#   values = [
-#     yamlencode({
-#       # Service Account Configuration
-#       serviceAccounts = {
-#         server = {
-#           name = "amp-iamproxy-ingest-service-account"
-#           create = true
-#           annotations = {
-#             "eks.amazonaws.com/role-arn" = aws_iam_role.amp_ingest_role.arn
-#           }
-#         }
-#       }
+  values = [
+    yamlencode({
+      # Service Account Configuration
+      serviceAccounts = {
+        server = {
+          name = "amp-iamproxy-ingest-service-account"
+          create = true
+          annotations = {
+            "eks.amazonaws.com/role-arn" = aws_iam_role.amp_ingest_role.arn
+          }
+        }
+      }
 
-#       # Server Configuration
-#       server = {
-#         # Persistent Volume Configuration
-#         persistentVolume = {
-#           enabled = true
-#           size    = "10Gi"
-#           storageClass = kubernetes_storage_class.ebs_gp3.metadata[0].name
-#           accessModes = ["ReadWriteOnce"]
-#         }
+      # Server Configuration
+      server = {
+        # Persistent Volume Configuration
+        persistentVolume = {
+          enabled = true
+          size    = "10Gi"
+          storageClass = kubernetes_storage_class.ebs_gp3.metadata[0].name
+          accessModes = ["ReadWriteOnce"]
+        }
 
-#         # Resource Configuration
-#         resources = {
-#           limits = {
-#             cpu    = "1000m"
-#             memory = "1Gi"
-#           }
-#           requests = {
-#             cpu    = "500m"
-#             memory = "512Mi"
-#           }
-#         }
+        # Resource Configuration
+        resources = {
+          limits = {
+            cpu    = "1000m"
+            memory = "1Gi"
+          }
+          requests = {
+            cpu    = "500m"
+            memory = "512Mi"
+          }
+        }
 
-#         # Data Retention
-#         retention = "15d"
+        # Data Retention
+        retention = "15d"
 
-#         # Remove conflicting write_relabel_configs that were causing issues
-#         remoteWrite = [
-#           {
-#             url = "https://aps-workspaces.${data.aws_region.current.name}.amazonaws.com/workspaces/${aws_prometheus_workspace.amp.id}/api/v1/remote_write"
-#             sigv4 = {
-#               region = data.aws_region.current.name
-#             }
-#             queue_config = {
-#               max_samples_per_send = 1000
-#               max_shards          = 200
-#               capacity            = 2500
-#             }
-#           }
-#         ]
+        # Remove conflicting write_relabel_configs that were causing issues
+        remoteWrite = [
+          {
+            url = "https://aps-workspaces.${data.aws_region.current.name}.amazonaws.com/workspaces/${aws_prometheus_workspace.amp.id}/api/v1/remote_write"
+            sigv4 = {
+              region = data.aws_region.current.name
+            }
+            queue_config = {
+              max_samples_per_send = 1000
+              max_shards          = 200
+              capacity            = 2500
+            }
+          }
+        ]
 
-#         # Security Context
-#         securityContext = {
-#           runAsUser  = 65534
-#           runAsGroup = 65534
-#           fsGroup    = 65534
-#         }
+        # Security Context
+        securityContext = {
+          runAsUser  = 65534
+          runAsGroup = 65534
+          fsGroup    = 65534
+        }
 
-#         # Remove additional args that may conflict
-#         extraArgs = {}
-#       }
+        # Remove additional args that may conflict
+        extraArgs = {}
+      }
 
-#       # Global configuration override
-#       global = {
-#         scrape_interval     = "15s"
-#         evaluation_interval = "15s"
-#         external_labels = {
-#           cluster = "my-project-eks-cluster-dev"
-#           region  = data.aws_region.current.name
-#         }
-#       }
+      # Global configuration override
+      global = {
+        scrape_interval     = "15s"
+        evaluation_interval = "15s"
+        external_labels = {
+          cluster = "my-project-eks-cluster-dev"
+          region  = data.aws_region.current.name
+        }
+      }
 
-#       # Disable unnecessary components
-#       alertmanager = {
-#         enabled = false
-#       }
+      # Disable unnecessary components
+      alertmanager = {
+        enabled = false
+      }
 
-#       pushgateway = {
-#         enabled = false
-#       }
+      pushgateway = {
+        enabled = false
+      }
 
-#       # Enable node exporter
-#       nodeExporter = {
-#         enabled = true
-#         resources = {
-#           limits = {
-#             cpu    = "200m"
-#             memory = "50Mi"
-#           }
-#           requests = {
-#             cpu    = "100m"
-#             memory = "30Mi"
-#           }
-#         }
-#       }
+      # Enable node exporter
+      nodeExporter = {
+        enabled = true
+        resources = {
+          limits = {
+            cpu    = "200m"
+            memory = "50Mi"
+          }
+          requests = {
+            cpu    = "100m"
+            memory = "30Mi"
+          }
+        }
+      }
 
-#       # Enable kube-state-metrics
-#       kubeStateMetrics = {
-#         enabled = true
-#         resources = {
-#           limits = {
-#             cpu    = "100m"
-#             memory = "150Mi"
-#           }
-#           requests = {
-#             cpu    = "50m"
-#             memory = "100Mi"
-#           }
-#         }
-#       }
+      # Enable kube-state-metrics
+      kubeStateMetrics = {
+        enabled = true
+        resources = {
+          limits = {
+            cpu    = "100m"
+            memory = "150Mi"
+          }
+          requests = {
+            cpu    = "50m"
+            memory = "100Mi"
+          }
+        }
+      }
 
-#       # Network Policy (optional)
-#       networkPolicy = {
-#         enabled = false
-#       }
-#     })
-#   ]
+      # Network Policy (optional)
+      networkPolicy = {
+        enabled = false
+      }
+    })
+  ]
 
-#   depends_on = [
-#     kubernetes_namespace.prometheus,
-#     kubernetes_storage_class.ebs_gp3,
-#     aws_iam_role_policy_attachment.amp_ingest_policy_attachment,
-#     aws_prometheus_workspace.amp
-#   ]
-# }
+  depends_on = [
+    kubernetes_namespace.prometheus,
+    kubernetes_storage_class.ebs_gp3,
+    aws_iam_role_policy_attachment.amp_ingest_policy_attachment,
+    aws_prometheus_workspace.amp
+  ]
+}
 
-# #####################################################################################################################
-# # Outputs
-# #####################################################################################################################
+#####################################################################################################################
+# Outputs
+#####################################################################################################################
 
-# output "prometheus_workspace_id" {
-#   description = "The ID of the Amazon Managed Service for Prometheus workspace"
-#   value       = aws_prometheus_workspace.amp.id
-# }
+output "prometheus_workspace_id" {
+  description = "The ID of the Amazon Managed Service for Prometheus workspace"
+  value       = aws_prometheus_workspace.amp.id
+}
 
-# output "prometheus_workspace_arn" {
-#   description = "The ARN of the Amazon Managed Service for Prometheus workspace"
-#   value       = aws_prometheus_workspace.amp.arn
-# }
+output "prometheus_workspace_arn" {
+  description = "The ARN of the Amazon Managed Service for Prometheus workspace"
+  value       = aws_prometheus_workspace.amp.arn
+}
 
-# output "prometheus_workspace_endpoint" {
-#   description = "The endpoint URL of the Amazon Managed Service for Prometheus workspace"
-#   value       = aws_prometheus_workspace.amp.prometheus_endpoint
-# }
+output "prometheus_workspace_endpoint" {
+  description = "The endpoint URL of the Amazon Managed Service for Prometheus workspace"
+  value       = aws_prometheus_workspace.amp.prometheus_endpoint
+}
 
-# output "amp_ingest_role_arn" {
-#   description = "The ARN of the IAM role for AMP ingestion"
-#   value       = aws_iam_role.amp_ingest_role.arn
-# }
+output "amp_ingest_role_arn" {
+  description = "The ARN of the IAM role for AMP ingestion"
+  value       = aws_iam_role.amp_ingest_role.arn
+}
 
-# output "prometheus_namespace" {
-#   description = "The Kubernetes namespace where Prometheus is deployed"
-#   value       = kubernetes_namespace.prometheus.metadata[0].name
-# }
+output "prometheus_namespace" {
+  description = "The Kubernetes namespace where Prometheus is deployed"
+  value       = kubernetes_namespace.prometheus.metadata[0].name
+}
 
-# output "eks_cluster_name" {
-#   description = "The name of the EKS cluster"
-#   value       = aws_eks_cluster.eks.name
-# }
+output "eks_cluster_name" {
+  description = "The name of the EKS cluster"
+  value       = aws_eks_cluster.eks.name
+}
 
-# output "eks_cluster_endpoint" {
-#   description = "The endpoint of the EKS cluster"
-#   value       = aws_eks_cluster.eks.endpoint
-# }
+output "eks_cluster_endpoint" {
+  description = "The endpoint of the EKS cluster"
+  value       = aws_eks_cluster.eks.endpoint
+}
