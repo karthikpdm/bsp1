@@ -137,180 +137,6 @@
 
 
 
-# # Creation of the EC2 instance for hosting Istio + Keycloak
-# resource "aws_eks_node_group" "osdu_ir_istio_node" {
-#   cluster_name    = aws_eks_cluster.eks.name
-#   node_group_name = "pw-eks-istio-node-${var.env}"
-#   node_role_arn   = var.worker_role_arn
-#   subnet_ids      = [data.aws_subnet.private_subnet_az1.id, data.aws_subnet.private_subnet_az2.id]
-
-#   scaling_config {
-#     desired_size = 1
-#     max_size     = 1
-#     min_size     = 1
-#   }
-
-#   instance_types = ["m5.xlarge"]
-#   disk_size = 80
-
-#   ami_type      = "AL2_x86_64"
-#   capacity_type = "ON_DEMAND"
-
-#   # Add labels for node scheduling
-#   labels = {
-#     "node-role"     = "osdu-istio-keycloak"
-#     "workload-type" = "istio"
-#     "component"     = "service-mesh"
-#   }
-
-#   # Add taints to ensure only Istio/Keycloak pods run here
-#   # taint {
-#   #   key    = "node-role"
-#   #   value  = "osdu-istio-keycloak"
-#   #   effect = "NO_SCHEDULE"
-#   # }
-
-#   tags = {
-#     Name                                        = "osdu-ir-istio-worker-node"
-#     "kubernetes.io/cluster/" = "owned"
-#   }
-
-#   # depends_on = [
-#   #   aws_eks_cluster.osdu-ir-eks-cluster,
-#   #   aws_iam_role_policy_attachment.osdu-ir-worker-node-policy-attach,
-#   #   aws_iam_role_policy_attachment.osdu-ir-eks-cni-policy-attach,
-#   #   aws_iam_role_policy_attachment.osdu-ir-eks-registry-policy-attach
-#   # ]
-# }
-
-# # Creation of the EC2 instance for hosting MinIO + PostgreSQL + Elasticsearch + RabbitMQ
-# resource "aws_eks_node_group" "osdu_ir_backend_node" {
-#   cluster_name    = aws_eks_cluster.eks.name
-#   node_group_name = "pw-eks-backend-nodes-${var.env}"
-#   # name = "${var.project_name}-eks-backend-nodes-${var.env}"
-#   node_role_arn   = var.worker_role_arn
-#   subnet_ids      = [data.aws_subnet.private_subnet_az1.id, data.aws_subnet.private_subnet_az2.id]
-
-#   scaling_config {
-#     desired_size = 1
-#     max_size     = 1
-#     min_size     = 1
-#   }
-
-#    instance_types = ["m5.xlarge"]
-#   disk_size = 80
-
-#   ami_type      = "AL2_x86_64"
-#   capacity_type = "ON_DEMAND"
-
-#   # Add labels for node scheduling
-#   labels = {
-#     "node-role"         = "osdu-backend"
-#     "workload-type"     = "database"
-#     "component"         = "backend-services"
-#     "storage-optimized" = "true"
-#   }
-
-#   # # Add taints for backend workloads
-#   # taint {
-#   #   key    = "node-role"
-#   #   value  = "osdu-backend"
-#   #   effect = "NO_SCHEDULE"
-#   # }
-
-#   tags = {
-#     Name                                        = "osdu-ir-backend-worker-node"
-#     "kubernetes.io/cluster/" = "owned"
-#   }
-
-#   # depends_on = [
-#   #   aws_eks_cluster.osdu-ir-eks-cluster,
-#   #   aws_iam_role_policy_attachment.osdu-ir-worker-node-policy-attach,
-#   #   aws_iam_role_policy_attachment.osdu-ir-eks-cni-policy-attach,
-#   #   aws_iam_role_policy_attachment.osdu-ir-eks-registry-policy-attach
-#   # ]
-# }
-
-# # ✅ OPTIMIZED: Creation of the EC2 instance for hosting OSDU Microservices + Airflow + Redis (UNTAINTED)
-# resource "aws_eks_node_group" "osdu_ir_frontend_node" {
-#   cluster_name    = aws_eks_cluster.eks.name
-#   node_group_name = "pw-eks-frontend-node-${var.env}"
-#   node_role_arn   = var.worker_role_arn
-#   subnet_ids      = [data.aws_subnet.private_subnet_az1.id, data.aws_subnet.private_subnet_az2.id]
-
-#   scaling_config {
-#     desired_size = 1
-#     max_size     = 1
-#     min_size     = 1
-#   }
-
-#   instance_types = ["m5.xlarge"]
-#   disk_size = 80
-
-#   ami_type      = "AL2_x86_64"
-#   capacity_type = "ON_DEMAND"
-
-#   # Add labels for node scheduling
-#   labels = {
-#     "node-role"         = "osdu-frontend"
-#     "workload-type"     = "microservices"
-#     "component"         = "osdu-apis"
-#     "compute-optimized" = "true"
-#   }
-
-#   # ✅ OPTIMIZED: No taints on frontend nodes - allows flexible scheduling for all OSDU microservices
-#   # This ensures OSDU microservices can schedule here without needing specific tolerations
-
-#   tags = {
-#     Name                                        = "osdu-ir-frontend-worker-node"
-#     "kubernetes.io/cluster/" = "owned"
-#   }
-
-#   # depends_on = [
-#   #   aws_eks_cluster.osdu-ir-eks-cluster,
-#   #   aws_iam_role_policy_attachment.osdu-ir-worker-node-policy-attach,
-#   #   aws_iam_role_policy_attachment.osdu-ir-eks-cni-policy-attach,
-#   #   aws_iam_role_policy_attachment.osdu-ir-eks-registry-policy-attach
-#   # ]
-# }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#################################################################################################################################################################
-
-
-
-
 # Creation of the EC2 instance for hosting Istio + Keycloak
 resource "aws_eks_node_group" "osdu_ir_istio_node" {
   cluster_name    = aws_eks_cluster.eks.name
@@ -324,25 +150,17 @@ resource "aws_eks_node_group" "osdu_ir_istio_node" {
     min_size     = 1
   }
 
-  # Use launch template for Calico optimization
-  launch_template {
-    name    = aws_launch_template.calico_istio_template.name
-    version = aws_launch_template.calico_istio_template.latest_version
-  }
+  instance_types = ["m5.xlarge"]
+  disk_size = 80
 
-  # Note: When using launch_template, these are defined in the template
-  # instance_types = ["m5.xlarge"]
-  # disk_size = 80
-  # ami_type      = "AL2_x86_64"
-  
+  ami_type      = "AL2_x86_64"
   capacity_type = "ON_DEMAND"
 
-  # Add labels for node scheduling + Calico support
+  # Add labels for node scheduling
   labels = {
     "node-role"     = "osdu-istio-keycloak"
     "workload-type" = "istio"
     "component"     = "service-mesh"
-    
     # Required for Calico CNI
     "kubernetes.io/os"                                = "linux"
     "projectcalico.org/operator-node-migration"       = "migrated"
@@ -355,26 +173,24 @@ resource "aws_eks_node_group" "osdu_ir_istio_node" {
   #   effect = "NO_SCHEDULE"
   # }
 
-  tags = merge(
-    {
-      Name = "osdu-ir-istio-worker-node"
-      "kubernetes.io/cluster/${aws_eks_cluster.eks.name}" = "owned"
-    },
-    var.map_tagging
-  )
+  tags = {
+    Name                                        = "osdu-ir-istio-worker-node"
+    "kubernetes.io/cluster/" = "owned"
+  }
 
-  # Ensure Calico is installed before creating nodes
-  depends_on = [
-    aws_eks_cluster.eks,
-    helm_release.calico,
-    aws_launch_template.calico_istio_template
-  ]
+  # depends_on = [
+  #   aws_eks_cluster.osdu-ir-eks-cluster,
+  #   aws_iam_role_policy_attachment.osdu-ir-worker-node-policy-attach,
+  #   aws_iam_role_policy_attachment.osdu-ir-eks-cni-policy-attach,
+  #   aws_iam_role_policy_attachment.osdu-ir-eks-registry-policy-attach
+  # ]
 }
 
 # Creation of the EC2 instance for hosting MinIO + PostgreSQL + Elasticsearch + RabbitMQ
 resource "aws_eks_node_group" "osdu_ir_backend_node" {
   cluster_name    = aws_eks_cluster.eks.name
   node_group_name = "pw-eks-backend-nodes-${var.env}"
+  # name = "${var.project_name}-eks-backend-nodes-${var.env}"
   node_role_arn   = var.worker_role_arn
   subnet_ids      = [data.aws_subnet.private_subnet_az1.id, data.aws_subnet.private_subnet_az2.id]
 
@@ -384,26 +200,18 @@ resource "aws_eks_node_group" "osdu_ir_backend_node" {
     min_size     = 1
   }
 
-  # Use launch template for Calico optimization
-  launch_template {
-    name    = aws_launch_template.calico_backend_template.name
-    version = aws_launch_template.calico_backend_template.latest_version
-  }
+   instance_types = ["m5.xlarge"]
+  disk_size = 80
 
-  # Note: When using launch_template, these are defined in the template
-  # instance_types = ["m5.xlarge"]
-  # disk_size = 80
-  # ami_type      = "AL2_x86_64"
-  
+  ami_type      = "AL2_x86_64"
   capacity_type = "ON_DEMAND"
 
-  # Add labels for node scheduling + Calico support
+  # Add labels for node scheduling
   labels = {
     "node-role"         = "osdu-backend"
     "workload-type"     = "database"
     "component"         = "backend-services"
     "storage-optimized" = "true"
-    
     # Required for Calico CNI
     "kubernetes.io/os"                                = "linux"
     "projectcalico.org/operator-node-migration"       = "migrated"
@@ -416,20 +224,17 @@ resource "aws_eks_node_group" "osdu_ir_backend_node" {
   #   effect = "NO_SCHEDULE"
   # }
 
-  tags = merge(
-    {
-      Name = "osdu-ir-backend-worker-node"
-      "kubernetes.io/cluster/${aws_eks_cluster.eks.name}" = "owned"
-    },
-    var.map_tagging
-  )
+  tags = {
+    Name                                        = "osdu-ir-backend-worker-node"
+    "kubernetes.io/cluster/" = "owned"
+  }
 
-  # Ensure Calico is installed before creating nodes
-  depends_on = [
-    aws_eks_cluster.eks,
-    helm_release.calico,
-    aws_launch_template.calico_backend_template
-  ]
+  # depends_on = [
+  #   aws_eks_cluster.osdu-ir-eks-cluster,
+  #   aws_iam_role_policy_attachment.osdu-ir-worker-node-policy-attach,
+  #   aws_iam_role_policy_attachment.osdu-ir-eks-cni-policy-attach,
+  #   aws_iam_role_policy_attachment.osdu-ir-eks-registry-policy-attach
+  # ]
 }
 
 # ✅ OPTIMIZED: Creation of the EC2 instance for hosting OSDU Microservices + Airflow + Redis (UNTAINTED)
@@ -445,26 +250,18 @@ resource "aws_eks_node_group" "osdu_ir_frontend_node" {
     min_size     = 1
   }
 
-  # Use launch template for Calico optimization
-  launch_template {
-    name    = aws_launch_template.calico_frontend_template.name
-    version = aws_launch_template.calico_frontend_template.latest_version
-  }
+  instance_types = ["m5.xlarge"]
+  disk_size = 80
 
-  # Note: When using launch_template, these are defined in the template
-  # instance_types = ["m5.xlarge"]
-  # disk_size = 80
-  # ami_type      = "AL2_x86_64"
-  
+  ami_type      = "AL2_x86_64"
   capacity_type = "ON_DEMAND"
 
-  # Add labels for node scheduling + Calico support
+  # Add labels for node scheduling
   labels = {
     "node-role"         = "osdu-frontend"
     "workload-type"     = "microservices"
     "component"         = "osdu-apis"
     "compute-optimized" = "true"
-    
     # Required for Calico CNI
     "kubernetes.io/os"                                = "linux"
     "projectcalico.org/operator-node-migration"       = "migrated"
@@ -473,156 +270,398 @@ resource "aws_eks_node_group" "osdu_ir_frontend_node" {
   # ✅ OPTIMIZED: No taints on frontend nodes - allows flexible scheduling for all OSDU microservices
   # This ensures OSDU microservices can schedule here without needing specific tolerations
 
-  tags = merge(
-    {
-      Name = "osdu-ir-frontend-worker-node"
-      "kubernetes.io/cluster/${aws_eks_cluster.eks.name}" = "owned"
-    },
-    var.map_tagging
-  )
+  tags = {
+    Name                                        = "osdu-ir-frontend-worker-node"
+    "kubernetes.io/cluster/" = "owned"
+  }
 
-  # Ensure Calico is installed before creating nodes
-  depends_on = [
-    aws_eks_cluster.eks,
-    helm_release.calico,
-    aws_launch_template.calico_frontend_template
-  ]
+  # depends_on = [
+  #   aws_eks_cluster.osdu-ir-eks-cluster,
+  #   aws_iam_role_policy_attachment.osdu-ir-worker-node-policy-attach,
+  #   aws_iam_role_policy_attachment.osdu-ir-eks-cni-policy-attach,
+  #   aws_iam_role_policy_attachment.osdu-ir-eks-registry-policy-attach
+  # ]
 }
 
-########################################################################################################################################################################
-########################################################### NODE GROUP LAUNCH TEMPLATES ##############################################################################
-########################################################################################################################################################################
 
-# Data source for the latest EKS-optimized AMI
-data "aws_ssm_parameter" "eks_ami_release_version" {
-  name = "/aws/service/eks/optimized-ami/${aws_eks_cluster.eks.version}/amazon-linux-2/recommended/release_version"
-}
 
-# Launch template for Istio nodes
-resource "aws_launch_template" "calico_istio_template" {
-  name_prefix   = "calico-istio-${var.env}-"
-  image_id      = data.aws_ssm_parameter.eks_ami_release_version.value
-  instance_type = "m5.xlarge"
 
-  vpc_security_group_ids = "sg-0fb75ddafc87b1356"
 
-  block_device_mappings {
-    device_name = "/dev/xvda"
-    ebs {
-      volume_size = 80
-      volume_type = "gp3"
-      iops        = 3000
-      throughput  = 125
-      encrypted   = true
-      delete_on_termination = true
-    }
-  }
 
-  user_data = base64encode(templatefile("${path.module}/calico-node-userdata.sh", {
-    cluster_name        = aws_eks_cluster.eks.name
-    cluster_endpoint    = aws_eks_cluster.eks.endpoint
-    cluster_ca_data     = aws_eks_cluster.eks.certificate_authority[0].data
-    bootstrap_arguments = "--container-runtime containerd"
-    node_role          = "istio"
-  }))
 
-  tag_specifications {
-    resource_type = "instance"
-    tags = merge(
-      {
-        Name = "calico-istio-node-${var.env}"
-        NodeRole = "istio"
-      },
-      var.map_tagging
-    )
-  }
 
-  tags = var.map_tagging
-}
 
-# Launch template for Backend nodes
-resource "aws_launch_template" "calico_backend_template" {
-  name_prefix   = "calico-backend-${var.env}-"
-  image_id      = data.aws_ssm_parameter.eks_ami_release_version.value
-  instance_type = "m5.xlarge"
 
-  vpc_security_group_ids = "sg-0fb75ddafc87b1356"
 
-  block_device_mappings {
-    device_name = "/dev/xvda"
-    ebs {
-      volume_size = 80
-      volume_type = "gp3"
-      iops        = 3000
-      throughput  = 125
-      encrypted   = true
-      delete_on_termination = true
-    }
-  }
 
-  user_data = base64encode(templatefile("${path.module}/calico-node-userdata.sh", {
-    cluster_name        = aws_eks_cluster.eks.name
-    cluster_endpoint    = aws_eks_cluster.eks.endpoint
-    cluster_ca_data     = aws_eks_cluster.eks.certificate_authority[0].data
-    bootstrap_arguments = "--container-runtime containerd"
-    node_role          = "backend"
-  }))
 
-  tag_specifications {
-    resource_type = "instance"
-    tags = merge(
-      {
-        Name = "calico-backend-node-${var.env}"
-        NodeRole = "backend"
-      },
-      var.map_tagging
-    )
-  }
 
-  tags = var.map_tagging
-}
 
-# Launch template for Frontend nodes
-resource "aws_launch_template" "calico_frontend_template" {
-  name_prefix   = "calico-frontend-${var.env}-"
-  image_id      = data.aws_ssm_parameter.eks_ami_release_version.value
-  instance_type = "m5.xlarge"
 
-  vpc_security_group_ids = "sg-0fb75ddafc87b1356"
 
-  block_device_mappings {
-    device_name = "/dev/xvda"
-    ebs {
-      volume_size = 80
-      volume_type = "gp3"
-      iops        = 3000
-      throughput  = 125
-      encrypted   = true
-      delete_on_termination = true
-    }
-  }
 
-  user_data = base64encode(templatefile("${path.module}/calico-node-userdata.sh", {
-    cluster_name        = aws_eks_cluster.eks.name
-    cluster_endpoint    = aws_eks_cluster.eks.endpoint
-    cluster_ca_data     = aws_eks_cluster.eks.certificate_authority[0].data
-    bootstrap_arguments = "--container-runtime containerd"
-    node_role          = "frontend"
-  }))
 
-  tag_specifications {
-    resource_type = "instance"
-    tags = merge(
-      {
-        Name = "calico-frontend-node-${var.env}"
-        NodeRole = "frontend"
-      },
-      var.map_tagging
-    )
-  }
 
-  tags = var.map_tagging
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+# #################################################################################################################################################################
+
+
+
+
+# # Creation of the EC2 instance for hosting Istio + Keycloak
+# resource "aws_eks_node_group" "osdu_ir_istio_node" {
+#   cluster_name    = aws_eks_cluster.eks.name
+#   node_group_name = "pw-eks-istio-node-${var.env}"
+#   node_role_arn   = var.worker_role_arn
+#   subnet_ids      = [data.aws_subnet.private_subnet_az1.id, data.aws_subnet.private_subnet_az2.id]
+
+#   scaling_config {
+#     desired_size = 1
+#     max_size     = 1
+#     min_size     = 1
+#   }
+
+#   # Use launch template for Calico optimization
+#   launch_template {
+#     name    = aws_launch_template.calico_istio_template.name
+#     version = aws_launch_template.calico_istio_template.latest_version
+#   }
+
+#   # Note: When using launch_template, these are defined in the template
+#   # instance_types = ["m5.xlarge"]
+#   # disk_size = 80
+#   # ami_type      = "AL2_x86_64"
+  
+#   capacity_type = "ON_DEMAND"
+
+#   # Add labels for node scheduling + Calico support
+#   labels = {
+#     "node-role"     = "osdu-istio-keycloak"
+#     "workload-type" = "istio"
+#     "component"     = "service-mesh"
+    
+#     # Required for Calico CNI
+#     "kubernetes.io/os"                                = "linux"
+#     "projectcalico.org/operator-node-migration"       = "migrated"
+#   }
+
+#   # Add taints to ensure only Istio/Keycloak pods run here
+#   # taint {
+#   #   key    = "node-role"
+#   #   value  = "osdu-istio-keycloak"
+#   #   effect = "NO_SCHEDULE"
+#   # }
+
+#   tags = merge(
+#     {
+#       Name = "osdu-ir-istio-worker-node"
+#       "kubernetes.io/cluster/${aws_eks_cluster.eks.name}" = "owned"
+#     },
+#     var.map_tagging
+#   )
+
+#   # Ensure Calico is installed before creating nodes
+#   depends_on = [
+#     aws_eks_cluster.eks,
+#     helm_release.calico,
+#     aws_launch_template.calico_istio_template
+#   ]
+# }
+
+# # Creation of the EC2 instance for hosting MinIO + PostgreSQL + Elasticsearch + RabbitMQ
+# resource "aws_eks_node_group" "osdu_ir_backend_node" {
+#   cluster_name    = aws_eks_cluster.eks.name
+#   node_group_name = "pw-eks-backend-nodes-${var.env}"
+#   node_role_arn   = var.worker_role_arn
+#   subnet_ids      = [data.aws_subnet.private_subnet_az1.id, data.aws_subnet.private_subnet_az2.id]
+
+#   scaling_config {
+#     desired_size = 1
+#     max_size     = 1
+#     min_size     = 1
+#   }
+
+#   # Use launch template for Calico optimization
+#   launch_template {
+#     name    = aws_launch_template.calico_backend_template.name
+#     version = aws_launch_template.calico_backend_template.latest_version
+#   }
+
+#   # Note: When using launch_template, these are defined in the template
+#   # instance_types = ["m5.xlarge"]
+#   # disk_size = 80
+#   # ami_type      = "AL2_x86_64"
+  
+#   capacity_type = "ON_DEMAND"
+
+#   # Add labels for node scheduling + Calico support
+#   labels = {
+#     "node-role"         = "osdu-backend"
+#     "workload-type"     = "database"
+#     "component"         = "backend-services"
+#     "storage-optimized" = "true"
+    
+#     # Required for Calico CNI
+#     "kubernetes.io/os"                                = "linux"
+#     "projectcalico.org/operator-node-migration"       = "migrated"
+#   }
+
+#   # # Add taints for backend workloads
+#   # taint {
+#   #   key    = "node-role"
+#   #   value  = "osdu-backend"
+#   #   effect = "NO_SCHEDULE"
+#   # }
+
+#   tags = merge(
+#     {
+#       Name = "osdu-ir-backend-worker-node"
+#       "kubernetes.io/cluster/${aws_eks_cluster.eks.name}" = "owned"
+#     },
+#     var.map_tagging
+#   )
+
+#   # Ensure Calico is installed before creating nodes
+#   depends_on = [
+#     aws_eks_cluster.eks,
+#     helm_release.calico,
+#     aws_launch_template.calico_backend_template
+#   ]
+# }
+
+# # ✅ OPTIMIZED: Creation of the EC2 instance for hosting OSDU Microservices + Airflow + Redis (UNTAINTED)
+# resource "aws_eks_node_group" "osdu_ir_frontend_node" {
+#   cluster_name    = aws_eks_cluster.eks.name
+#   node_group_name = "pw-eks-frontend-node-${var.env}"
+#   node_role_arn   = var.worker_role_arn
+#   subnet_ids      = [data.aws_subnet.private_subnet_az1.id, data.aws_subnet.private_subnet_az2.id]
+
+#   scaling_config {
+#     desired_size = 1
+#     max_size     = 1
+#     min_size     = 1
+#   }
+
+#   # Use launch template for Calico optimization
+#   launch_template {
+#     name    = aws_launch_template.calico_frontend_template.name
+#     version = aws_launch_template.calico_frontend_template.latest_version
+#   }
+
+#   # Note: When using launch_template, these are defined in the template
+#   # instance_types = ["m5.xlarge"]
+#   # disk_size = 80
+#   # ami_type      = "AL2_x86_64"
+  
+#   capacity_type = "ON_DEMAND"
+
+#   # Add labels for node scheduling + Calico support
+#   labels = {
+#     "node-role"         = "osdu-frontend"
+#     "workload-type"     = "microservices"
+#     "component"         = "osdu-apis"
+#     "compute-optimized" = "true"
+    
+#     # Required for Calico CNI
+#     "kubernetes.io/os"                                = "linux"
+#     "projectcalico.org/operator-node-migration"       = "migrated"
+#   }
+
+#   # ✅ OPTIMIZED: No taints on frontend nodes - allows flexible scheduling for all OSDU microservices
+#   # This ensures OSDU microservices can schedule here without needing specific tolerations
+
+#   tags = merge(
+#     {
+#       Name = "osdu-ir-frontend-worker-node"
+#       "kubernetes.io/cluster/${aws_eks_cluster.eks.name}" = "owned"
+#     },
+#     var.map_tagging
+#   )
+
+#   # Ensure Calico is installed before creating nodes
+#   depends_on = [
+#     aws_eks_cluster.eks,
+#     helm_release.calico,
+#     aws_launch_template.calico_frontend_template
+#   ]
+# }
+
+# ########################################################################################################################################################################
+# ########################################################### NODE GROUP LAUNCH TEMPLATES ##############################################################################
+# ########################################################################################################################################################################
+
+# # Data source for the latest EKS-optimized AMI
+# data "aws_ssm_parameter" "eks_ami_release_version" {
+#   name = "/aws/service/eks/optimized-ami/${aws_eks_cluster.eks.version}/amazon-linux-2/recommended/release_version"
+# }
+
+# # Launch template for Istio nodes
+# resource "aws_launch_template" "calico_istio_template" {
+#   name_prefix   = "calico-istio-${var.env}-"
+#   image_id      = data.aws_ssm_parameter.eks_ami_release_version.value
+#   instance_type = "m5.xlarge"
+
+#   vpc_security_group_ids = "sg-0fb75ddafc87b1356"
+
+#   block_device_mappings {
+#     device_name = "/dev/xvda"
+#     ebs {
+#       volume_size = 80
+#       volume_type = "gp3"
+#       iops        = 3000
+#       throughput  = 125
+#       encrypted   = true
+#       delete_on_termination = true
+#     }
+#   }
+
+#   user_data = base64encode(templatefile("${path.module}/calico-node-userdata.sh", {
+#     cluster_name        = aws_eks_cluster.eks.name
+#     cluster_endpoint    = aws_eks_cluster.eks.endpoint
+#     cluster_ca_data     = aws_eks_cluster.eks.certificate_authority[0].data
+#     bootstrap_arguments = "--container-runtime containerd"
+#     node_role          = "istio"
+#   }))
+
+#   tag_specifications {
+#     resource_type = "instance"
+#     tags = merge(
+#       {
+#         Name = "calico-istio-node-${var.env}"
+#         NodeRole = "istio"
+#       },
+#       var.map_tagging
+#     )
+#   }
+
+#   tags = var.map_tagging
+# }
+
+# # Launch template for Backend nodes
+# resource "aws_launch_template" "calico_backend_template" {
+#   name_prefix   = "calico-backend-${var.env}-"
+#   image_id      = data.aws_ssm_parameter.eks_ami_release_version.value
+#   instance_type = "m5.xlarge"
+
+#   vpc_security_group_ids = "sg-0fb75ddafc87b1356"
+
+#   block_device_mappings {
+#     device_name = "/dev/xvda"
+#     ebs {
+#       volume_size = 80
+#       volume_type = "gp3"
+#       iops        = 3000
+#       throughput  = 125
+#       encrypted   = true
+#       delete_on_termination = true
+#     }
+#   }
+
+#   user_data = base64encode(templatefile("${path.module}/calico-node-userdata.sh", {
+#     cluster_name        = aws_eks_cluster.eks.name
+#     cluster_endpoint    = aws_eks_cluster.eks.endpoint
+#     cluster_ca_data     = aws_eks_cluster.eks.certificate_authority[0].data
+#     bootstrap_arguments = "--container-runtime containerd"
+#     node_role          = "backend"
+#   }))
+
+#   tag_specifications {
+#     resource_type = "instance"
+#     tags = merge(
+#       {
+#         Name = "calico-backend-node-${var.env}"
+#         NodeRole = "backend"
+#       },
+#       var.map_tagging
+#     )
+#   }
+
+#   tags = var.map_tagging
+# }
+
+# # Launch template for Frontend nodes
+# resource "aws_launch_template" "calico_frontend_template" {
+#   name_prefix   = "calico-frontend-${var.env}-"
+#   image_id      = data.aws_ssm_parameter.eks_ami_release_version.value
+#   instance_type = "m5.xlarge"
+
+#   vpc_security_group_ids = "sg-0fb75ddafc87b1356"
+
+#   block_device_mappings {
+#     device_name = "/dev/xvda"
+#     ebs {
+#       volume_size = 80
+#       volume_type = "gp3"
+#       iops        = 3000
+#       throughput  = 125
+#       encrypted   = true
+#       delete_on_termination = true
+#     }
+#   }
+
+#   user_data = base64encode(templatefile("${path.module}/calico-node-userdata.sh", {
+#     cluster_name        = aws_eks_cluster.eks.name
+#     cluster_endpoint    = aws_eks_cluster.eks.endpoint
+#     cluster_ca_data     = aws_eks_cluster.eks.certificate_authority[0].data
+#     bootstrap_arguments = "--container-runtime containerd"
+#     node_role          = "frontend"
+#   }))
+
+#   tag_specifications {
+#     resource_type = "instance"
+#     tags = merge(
+#       {
+#         Name = "calico-frontend-node-${var.env}"
+#         NodeRole = "frontend"
+#       },
+#       var.map_tagging
+#     )
+#   }
+
+#   tags = var.map_tagging
+# }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ########################################################################################################################################################################
 ########################################################### OUTPUT VARIABLES ##########################################################################################
